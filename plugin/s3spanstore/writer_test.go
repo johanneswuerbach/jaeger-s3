@@ -1,0 +1,95 @@
+package s3spanstore
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/service/firehose"
+	"github.com/aws/aws-sdk-go-v2/service/firehose/types"
+	"github.com/gogo/protobuf/jsonpb"
+	"github.com/hashicorp/go-hclog"
+	"github.com/jaegertracing/jaeger/model"
+	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
+	"github.com/stretchr/testify/assert"
+)
+
+type mockPutItemAPI func(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error)
+
+func (m mockPutItemAPI) PutRecord(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error) {
+	return m(ctx, params, optFns...)
+}
+
+func TestWriteSpan(t *testing.T) {
+	assert := assert.New(t)
+	loggerName := "jaeger-s3"
+
+	logLevel := os.Getenv("GRPC_STORAGE_PLUGIN_LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = hclog.Warn.String()
+	}
+
+	logger := hclog.New(&hclog.LoggerOptions{
+		Level:      hclog.LevelFromString(logLevel),
+		Name:       loggerName,
+		JSONFormat: true,
+	})
+
+	ctx := context.TODO()
+
+	var writtenRecord *types.Record
+
+	svc := mockPutItemAPI(func(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error) {
+		writtenRecord = params.Record
+		return nil, nil
+	})
+
+	writer, err := NewWriter(logger, svc, config.Kinesis{
+		SpanStreamName: "spans-stream",
+	})
+	assert.NoError(err)
+
+	var span model.Span
+	assert.NoError(jsonpb.Unmarshal(strings.NewReader(`{
+		"traceId": "AAAAAAAAAAAAAAAAAAAAEQ==",
+		"spanId": "AAAAAAAAAAM=",
+		"operationName": "example-operation-1",
+		"references": [],
+		"startTime": "2017-01-26T16:46:31.639875Z",
+		"duration": "100000ns",
+		"tags": [],
+		"process": {
+			"serviceName": "example-service-1",
+			"tags": []
+		},
+		"logs": [
+			{
+				"timestamp": "2017-01-26T16:46:31.639875Z",
+				"fields": []
+			},
+			{
+				"timestamp": "2017-01-26T16:46:31.639875Z",
+				"fields": []
+			}
+		]
+	}`), &span))
+
+	assert.NoError(writer.WriteSpan(ctx, &span))
+
+	assert.Equal(stripFormatting(`{
+		"traceid":"0000000000000011",
+		"spanid":"0000000000000003",
+		"operationname":"example-operation-1",
+		"spankind":"",
+		"starttime":1485449191639,
+		"duration":100000,
+		"tags":{},
+		"servicename":"example-service-1",
+		"spanpayload":"{\"trace_id\":\"AAAAAAAAAAAAAAAAAAAAEQ==\",\"span_id\":\"AAAAAAAAAAM=\",\"operation_name\":\"example-operation-1\",\"references\":[],\"flags\":0,\"start_time\":\"2017-01-26T16:46:31.639875Z\",\"duration\":100000,\"tags\":[],\"logs\":[{\"timestamp\":\"2017-01-26T16:46:31.639875Z\",\"fields\":[]},{\"timestamp\":\"2017-01-26T16:46:31.639875Z\",\"fields\":[]}],\"process\":{\"service_name\":\"example-service-1\",\"tags\":[]}}"
+	}`), string(writtenRecord.Data))
+}
+
+func stripFormatting(json string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
+}

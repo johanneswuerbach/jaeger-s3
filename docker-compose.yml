@@ -1,0 +1,45 @@
+version: '3.7'
+
+services:
+  jaeger:
+    image: johanneswuerbach/jaeger-s3
+    build:
+      context: .
+      target: jaeger-test
+    hostname: jaeger
+    environment:
+      - GRPC_STORAGE_PLUGIN_LOG_LEVEL=debug
+      - SPAN_STORAGE_TYPE=grpc-plugin
+      - GRPC_STORAGE_PLUGIN_BINARY=/go/bin/s3-plugin
+      - GRPC_STORAGE_PLUGIN_CONFIGURATION_FILE=/test-config.yml
+      - AWS_PROFILE
+      - AWS_REGION
+    volumes:
+      - ~/.aws:/root/.aws
+      - ./test-config.yml:/test-config.yml
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
+
+  hotrod:
+    image: jaegertracing/example-hotrod:latest
+    ports:
+      - "8080:8080"
+    command: ["all"]
+    environment:
+      - JAEGER_AGENT_HOST=jaeger
+      - JAEGER_AGENT_PORT=6831
+    depends_on:
+      - jaeger
+
+  test:
+    build:
+      context: .
+      target: test
+    volumes:
+      - int-mod-cache:/go/pkg/mod
+      - int-build-cache:/root/.cache/go-build
+
+volumes:
+  int-mod-cache:
+  int-build-cache:
