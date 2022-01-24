@@ -32,15 +32,36 @@ type Writer struct {
 
 // SpanRecord contains queryable properties from the span and the span as json payload
 type SpanRecord struct {
-	TraceID       string            `json:"traceid"`       // 1
-	SpanID        string            `json:"spanid"`        // 2
-	OperationName string            `json:"operationname"` // 3
-	SpanKind      string            `json:"spankind"`      // 4
-	StartTime     int64             `json:"starttime"`     // 5
-	Duration      int64             `json:"duration"`      // 6
-	Tags          map[string]string `json:"tags"`          // 7
-	ServiceName   string            `json:"servicename"`   // 8
-	SpanPayload   string            `json:"spanpayload"`   // 9
+	TraceID       string                  `json:"traceid"`       // 1
+	SpanID        string                  `json:"spanid"`        // 2
+	OperationName string                  `json:"operationname"` // 3
+	SpanKind      string                  `json:"spankind"`      // 4
+	StartTime     int64                   `json:"starttime"`     // 5
+	Duration      int64                   `json:"duration"`      // 6
+	Tags          map[string]string       `json:"tags"`          // 7
+	ServiceName   string                  `json:"servicename"`   // 8
+	SpanPayload   string                  `json:"spanpayload"`   // 9
+	References    []*SpanRecordReferences `json:"references"`    // 10
+}
+
+type SpanRecordReferences struct {
+	TraceID string `json:"traceid"` // 1
+	SpanID  string `json:"spanid"`  // 2
+	RefType int64  `json:"reftype"` // 3
+}
+
+func NewSpanRecordReferencesFromSpanReferences(span *model.Span) []*SpanRecordReferences {
+	spanRecordReferences := make([]*SpanRecordReferences, len(span.References))
+
+	for i, v := range span.References {
+		spanRecordReferences[i] = &SpanRecordReferences{
+			TraceID: v.TraceID.String(),
+			SpanID:  v.SpanID.String(),
+			RefType: int64(v.RefType),
+		}
+	}
+
+	return spanRecordReferences
 }
 
 func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
@@ -67,6 +88,7 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		Tags:          kvToMap(searchableTags),
 		ServiceName:   span.Process.ServiceName,
 		SpanPayload:   string(spanBytes),
+		References:    NewSpanRecordReferencesFromSpanReferences(span),
 	}, nil
 }
 
