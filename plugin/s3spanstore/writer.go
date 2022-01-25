@@ -2,6 +2,7 @@ package s3spanstore
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/firehose"
 	"github.com/aws/aws-sdk-go-v2/service/firehose/types"
+	"github.com/gogo/protobuf/proto"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
@@ -109,7 +111,7 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		searchableTags = append(searchableTags, log.Fields...)
 	}
 
-	spanBytes, err := json.Marshal(span)
+	spanBytes, err := proto.Marshal(span)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize item: %w", err)
 	}
@@ -125,7 +127,7 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		Duration:      span.Duration.Nanoseconds(),
 		Tags:          kvToMap(searchableTags),
 		ServiceName:   span.Process.ServiceName,
-		SpanPayload:   string(spanBytes),
+		SpanPayload:   base64.StdEncoding.EncodeToString(spanBytes),
 		References:    NewSpanRecordReferencesFromSpanReferences(span),
 	}, nil
 }

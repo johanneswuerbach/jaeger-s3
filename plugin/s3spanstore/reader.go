@@ -2,7 +2,7 @@ package s3spanstore
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
+	"github.com/gogo/protobuf/proto"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
@@ -32,8 +33,13 @@ type Reader struct {
 }
 
 func toSpan(payload string) (*model.Span, error) {
+	payloadBytes, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode payload: %w", err)
+	}
+
 	span := &model.Span{}
-	if err := json.Unmarshal([]byte(payload), &span); err != nil {
+	if err := proto.Unmarshal(payloadBytes, span); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal span: %w", err)
 	}
 	return span, nil
