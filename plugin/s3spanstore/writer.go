@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/firehose"
@@ -44,10 +45,8 @@ func NewWriter(logger hclog.Logger, svc KinesisAPI, firehoseConfig config.Kinesi
 			case <-w.done:
 				return
 			case <-w.ticker.C:
-				if time.Since(w.lastFlush) > MIN_FLUSH_INTERVAL {
-					if err := w.flushBuffer(ctx); err != nil {
-						w.logger.Error("failed to flush buffer after min flush interval", err)
-					}
+				if err := w.flushBufferIfOld(ctx); err != nil {
+					w.logger.Error("failed to flush buffer after min flush interval", err)
 				}
 			}
 		}
@@ -66,6 +65,7 @@ type Writer struct {
 	lastFlush     time.Time
 	recordsLength int
 	recordsBuffer []types.Record
+	bufferMutex   sync.Mutex
 }
 
 // SpanRecord contains queryable properties from the span and the span as json payload
@@ -152,28 +152,50 @@ func spanToRecord(span *model.Span) ([]byte, error) {
 	return spanRecordBytes, nil
 }
 
-func (s *Writer) emptyRecordsBuffer() []types.Record {
-	recordsBuffer := s.recordsBuffer
-	s.recordsBuffer = make([]types.Record, 0)
-	s.recordsLength = 0
-	s.lastFlush = time.Now()
+func (w *Writer) emptyRecordsBuffer() []types.Record {
+	recordsBuffer := w.recordsBuffer
+	w.recordsBuffer = make([]types.Record, 0)
+	w.recordsLength = 0
+	w.lastFlush = time.Now()
 
 	return recordsBuffer
 }
 
-func (s *Writer) addRecordToBuffer(record []byte, recordLength int) int {
-	s.recordsBuffer = append(s.recordsBuffer, types.Record{
+func (w *Writer) addRecordToBuffer(record []byte, recordLength int) int {
+	w.recordsBuffer = append(w.recordsBuffer, types.Record{
 		Data: record,
 	})
-	s.recordsLength += recordLength
+	w.recordsLength += recordLength
 
-	return len(s.recordsBuffer)
+	return len(w.recordsBuffer)
+}
+
+func (w *Writer) flushBufferWithLock(ctx context.Context) error {
+	w.bufferMutex.Lock()
+	defer w.bufferMutex.Unlock()
+
+	return w.flushBuffer(ctx)
+}
+
+func (w *Writer) flushBufferIfOld(ctx context.Context) error {
+	w.bufferMutex.Lock()
+	defer w.bufferMutex.Unlock()
+
+	if time.Since(w.lastFlush) < MIN_FLUSH_INTERVAL {
+		return nil
+	}
+
+	return w.flushBuffer(ctx)
 }
 
 func (s *Writer) flushBuffer(ctx context.Context) error {
 	recordsBuffer := s.emptyRecordsBuffer()
+	recordsBufferLen := len(recordsBuffer)
 
-	s.logger.Debug("flushBuffer", "records", len(recordsBuffer))
+	s.logger.Debug("flushBuffer", "records", recordsBufferLen)
+	if recordsBufferLen == 0 {
+		return nil
+	}
 
 	_, err := s.svc.PutRecordBatch(ctx, &firehose.PutRecordBatchInput{
 		DeliveryStreamName: &s.spansStreamName,
@@ -192,7 +214,10 @@ func (s *Writer) writeSpanItem(ctx context.Context, span *model.Span) error {
 	}
 	spanRecordLength := len(spanRecordBytes)
 
-	if s.recordsLength+int(spanRecordLength) > MAX_BATCH_BYTE_SIZE {
+	s.bufferMutex.Lock()
+	defer s.bufferMutex.Unlock()
+
+	if s.recordsLength+spanRecordLength > MAX_BATCH_BYTE_SIZE {
 		if err := s.flushBuffer(ctx); err != nil {
 			return fmt.Errorf("failed to flush buffer after max byte size: %w", err)
 		}
@@ -224,5 +249,5 @@ func (w *Writer) Close() error {
 
 	ctx := context.Background()
 
-	return w.flushBuffer(ctx)
+	return w.flushBufferWithLock(ctx)
 }
