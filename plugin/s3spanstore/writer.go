@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/firehose"
 	"github.com/aws/aws-sdk-go-v2/service/firehose/types"
@@ -13,21 +14,58 @@ import (
 )
 
 type KinesisAPI interface {
-	PutRecord(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error)
+	PutRecordBatch(ctx context.Context, params *firehose.PutRecordBatchInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordBatchOutput, error)
 }
 
+const (
+	MAX_BATCH_BYTE_SIZE = 1024 * 1024 * 4
+	MAX_BATCH_RECORDS   = 500
+)
+
+var (
+	MIN_FLUSH_INTERVAL = 10 * time.Second
+)
+
 func NewWriter(logger hclog.Logger, svc KinesisAPI, firehoseConfig config.Kinesis) (*Writer, error) {
-	return &Writer{
+	w := &Writer{
 		svc:             svc,
 		spansStreamName: firehoseConfig.SpanStreamName,
 		logger:          logger,
-	}, nil
+		ticker:          time.NewTicker(MIN_FLUSH_INTERVAL),
+		done:            make(chan bool),
+	}
+
+	ctx := context.Background()
+	w.emptyRecordsBuffer()
+
+	go func() {
+		for {
+			select {
+			case <-w.done:
+				return
+			case <-w.ticker.C:
+				if time.Since(w.lastFlush) > MIN_FLUSH_INTERVAL {
+					if err := w.flushBuffer(ctx); err != nil {
+						w.logger.Error("failed to flush buffer after min flush interval", err)
+					}
+				}
+			}
+		}
+	}()
+
+	return w, nil
 }
 
 type Writer struct {
 	logger          hclog.Logger
 	svc             KinesisAPI
 	spansStreamName string
+	ticker          *time.Ticker
+	done            chan bool
+
+	lastFlush     time.Time
+	recordsLength int
+	recordsBuffer []types.Record
 }
 
 // SpanRecord contains queryable properties from the span and the span as json payload
@@ -101,24 +139,69 @@ func kvToMap(kvs []model.KeyValue) map[string]string {
 	return kvMap
 }
 
-func (s *Writer) writeSpanItem(ctx context.Context, span *model.Span) error {
+func spanToRecord(span *model.Span) ([]byte, error) {
 	spanRecord, err := NewSpanRecordFromSpan(span)
 	if err != nil {
-		return fmt.Errorf("failed to create span record: %w", err)
+		return nil, fmt.Errorf("failed to create span record: %w", err)
 	}
 	spanRecordBytes, err := json.Marshal(spanRecord)
 	if err != nil {
-		return fmt.Errorf("failed to serialize span record: %w", err)
+		return nil, fmt.Errorf("failed to serialize span record: %w", err)
 	}
 
-	_, err = s.svc.PutRecord(ctx, &firehose.PutRecordInput{
-		Record: &types.Record{
-			Data: spanRecordBytes,
-		},
+	return spanRecordBytes, nil
+}
+
+func (s *Writer) emptyRecordsBuffer() []types.Record {
+	recordsBuffer := s.recordsBuffer
+	s.recordsBuffer = make([]types.Record, 0)
+	s.recordsLength = 0
+	s.lastFlush = time.Now()
+
+	return recordsBuffer
+}
+
+func (s *Writer) addRecordToBuffer(record []byte, recordLength int) int {
+	s.recordsBuffer = append(s.recordsBuffer, types.Record{
+		Data: record,
+	})
+	s.recordsLength += recordLength
+
+	return len(s.recordsBuffer)
+}
+
+func (s *Writer) flushBuffer(ctx context.Context) error {
+	recordsBuffer := s.emptyRecordsBuffer()
+
+	s.logger.Debug("flushBuffer", "records", len(recordsBuffer))
+
+	_, err := s.svc.PutRecordBatch(ctx, &firehose.PutRecordBatchInput{
 		DeliveryStreamName: &s.spansStreamName,
+		Records:            recordsBuffer,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to put item: %w", err)
+	}
+	return nil
+}
+
+func (s *Writer) writeSpanItem(ctx context.Context, span *model.Span) error {
+	spanRecordBytes, err := spanToRecord(span)
+	if err != nil {
+		return fmt.Errorf("failed to convert span to record: %w", err)
+	}
+	spanRecordLength := len(spanRecordBytes)
+
+	if s.recordsLength+int(spanRecordLength) > MAX_BATCH_BYTE_SIZE {
+		if err := s.flushBuffer(ctx); err != nil {
+			return fmt.Errorf("failed to flush buffer after max byte size: %w", err)
+		}
+	}
+
+	if s.addRecordToBuffer(spanRecordBytes, spanRecordLength) >= MAX_BATCH_RECORDS {
+		if err := s.flushBuffer(ctx); err != nil {
+			return fmt.Errorf("failed to flush buffer after max records: %w", err)
+		}
 	}
 
 	// s.logger.Debug("PutRecord", out)
@@ -133,4 +216,13 @@ func (s *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 		return fmt.Errorf("failed to write span item, %v", err)
 	}
 	return nil
+}
+
+func (w *Writer) Close() error {
+	w.ticker.Stop()
+	w.done <- true
+
+	ctx := context.Background()
+
+	return w.flushBuffer(ctx)
 }

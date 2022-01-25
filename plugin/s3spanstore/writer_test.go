@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type mockPutItemAPI func(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error)
+type mockPutItemAPI func(ctx context.Context, params *firehose.PutRecordBatchInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordBatchOutput, error)
 
-func (m mockPutItemAPI) PutRecord(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error) {
+func (m mockPutItemAPI) PutRecordBatch(ctx context.Context, params *firehose.PutRecordBatchInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordBatchOutput, error) {
 	return m(ctx, params, optFns...)
 }
 
@@ -27,7 +27,7 @@ func TestWriteSpan(t *testing.T) {
 
 	logLevel := os.Getenv("GRPC_STORAGE_PLUGIN_LOG_LEVEL")
 	if logLevel == "" {
-		logLevel = hclog.Warn.String()
+		logLevel = hclog.Debug.String()
 	}
 
 	logger := hclog.New(&hclog.LoggerOptions{
@@ -38,10 +38,10 @@ func TestWriteSpan(t *testing.T) {
 
 	ctx := context.TODO()
 
-	var writtenRecord *types.Record
+	var writtenRecord types.Record
 
-	svc := mockPutItemAPI(func(ctx context.Context, params *firehose.PutRecordInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordOutput, error) {
-		writtenRecord = params.Record
+	svc := mockPutItemAPI(func(ctx context.Context, params *firehose.PutRecordBatchInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordBatchOutput, error) {
+		writtenRecord = params.Records[0]
 		return nil, nil
 	})
 
@@ -76,6 +76,8 @@ func TestWriteSpan(t *testing.T) {
 	}`), &span))
 
 	assert.NoError(writer.WriteSpan(ctx, &span))
+
+	assert.NoError(writer.Close())
 
 	assert.Equal(stripFormatting(`{
 		"traceid":"0000000000000011",
