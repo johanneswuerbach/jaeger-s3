@@ -113,22 +113,23 @@ func EncodeSpanPayload(span *model.Span) (string, error) {
 	}
 
 	var b bytes.Buffer
-	sn := snappy.NewBufferedWriter(&b)
+	b64 := base64.NewEncoder(base64.StdEncoding, &b)
+	sn := snappy.NewBufferedWriter(b64)
 
 	_, err = sn.Write(spanBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to write compress span: %w", err)
 	}
 
-	if err = sn.Flush(); err != nil {
-		return "", fmt.Errorf("failed to flush compress span: %w", err)
-	}
-
 	if err = sn.Close(); err != nil {
 		return "", fmt.Errorf("failed to close compress span: %w", err)
 	}
 
-	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
+	if err = b64.Close(); err != nil {
+		return "", fmt.Errorf("failed to base64 span: %w", err)
+	}
+
+	return b.String(), nil
 }
 
 func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
