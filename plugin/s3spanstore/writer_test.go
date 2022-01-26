@@ -88,7 +88,7 @@ func TestWriteSpan(t *testing.T) {
 		"duration":100000,
 		"tags":{},
 		"servicename":"example-service-1",
-		"spanpayload":"ChAAAAAAAAAAAAAAAAAAAAAREggAAAAAAAAAAxoTZXhhbXBsZS1vcGVyYXRpb24tMTIMCOfPqMQFELjvjrECOgQQoI0GSg4KDAjnz6jEBRC4746xAkoOCgwI58+oxAUQuO+OsQJSEwoRZXhhbXBsZS1zZXJ2aWNlLTE=",
+		"spanpayload":"H4sIAAAAAAAA/+ISYEAFgkIcUBazlHBqRWJuQU6qbn5BalFiSWZ+nq6hEQ/H8/MrjrAK7Hjft5HJikVgQS+bFx8Xiig6P0iYSxBmVHFqUVlmcqquIQAAAP//AQAA//+PN0d/egAAAA==",
 		"references":[]
 	}`), string(writtenRecord.Data))
 }

@@ -1,6 +1,8 @@
 package s3spanstore
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -104,6 +106,31 @@ func NewSpanRecordReferencesFromSpanReferences(span *model.Span) []*SpanRecordRe
 	return spanRecordReferences
 }
 
+func EncodeSpanPayload(span *model.Span) (string, error) {
+	spanBytes, err := proto.Marshal(span)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize item: %w", err)
+	}
+
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+
+	_, err = gz.Write(spanBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to write compress span: %w", err)
+	}
+
+	if err = gz.Flush(); err != nil {
+		return "", fmt.Errorf("failed to flush compress span: %w", err)
+	}
+
+	if err = gz.Close(); err != nil {
+		return "", fmt.Errorf("failed to close compress span: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
+}
+
 func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 	searchableTags := append([]model.KeyValue{}, span.Tags...)
 	searchableTags = append(searchableTags, span.Process.Tags...)
@@ -111,9 +138,9 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		searchableTags = append(searchableTags, log.Fields...)
 	}
 
-	spanBytes, err := proto.Marshal(span)
+	spanPayload, err := EncodeSpanPayload(span)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize item: %w", err)
+		return nil, fmt.Errorf("failed to create span payload: %w", err)
 	}
 
 	kind, _ := span.GetSpanKind()
@@ -127,7 +154,7 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		Duration:      span.Duration.Nanoseconds(),
 		Tags:          kvToMap(searchableTags),
 		ServiceName:   span.Process.ServiceName,
-		SpanPayload:   base64.StdEncoding.EncodeToString(spanBytes),
+		SpanPayload:   spanPayload,
 		References:    NewSpanRecordReferencesFromSpanReferences(span),
 	}, nil
 }

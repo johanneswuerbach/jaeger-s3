@@ -1,10 +1,13 @@
 package s3spanstore
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -38,8 +41,22 @@ func toSpan(payload string) (*model.Span, error) {
 		return nil, fmt.Errorf("failed to decode payload: %w", err)
 	}
 
+	b := bytes.NewBuffer(payloadBytes)
+
+	var r io.Reader
+	r, err = gzip.NewReader(b)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read compressed payload: %w", err)
+	}
+
+	var resB bytes.Buffer
+	_, err = resB.ReadFrom(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress payload: %w", err)
+	}
+
 	span := &model.Span{}
-	if err := proto.Unmarshal(payloadBytes, span); err != nil {
+	if err := proto.Unmarshal(resB.Bytes(), span); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal span: %w", err)
 	}
 	return span, nil
