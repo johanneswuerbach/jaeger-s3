@@ -2,7 +2,6 @@ package s3spanstore
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -13,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/firehose"
 	"github.com/aws/aws-sdk-go-v2/service/firehose/types"
 	"github.com/gogo/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
@@ -113,18 +113,18 @@ func EncodeSpanPayload(span *model.Span) (string, error) {
 	}
 
 	var b bytes.Buffer
-	gz := gzip.NewWriter(&b)
+	sn := snappy.NewBufferedWriter(&b)
 
-	_, err = gz.Write(spanBytes)
+	_, err = sn.Write(spanBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to write compress span: %w", err)
 	}
 
-	if err = gz.Flush(); err != nil {
+	if err = sn.Flush(); err != nil {
 		return "", fmt.Errorf("failed to flush compress span: %w", err)
 	}
 
-	if err = gz.Close(); err != nil {
+	if err = sn.Close(); err != nil {
 		return "", fmt.Errorf("failed to close compress span: %w", err)
 	}
 

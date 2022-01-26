@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/athena v1.12.0
 	github.com/aws/aws-sdk-go-v2/service/firehose v1.12.0
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/snappy v0.0.4
 	github.com/hashicorp/go-hclog v1.1.0
 	github.com/jaegertracing/jaeger v1.30.0
 	github.com/opentracing/opentracing-go v1.2.0

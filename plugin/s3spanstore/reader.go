@@ -2,18 +2,17 @@ package s3spanstore
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
 	"github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/gogo/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
@@ -42,12 +41,7 @@ func toSpan(payload string) (*model.Span, error) {
 	}
 
 	b := bytes.NewBuffer(payloadBytes)
-
-	var r io.Reader
-	r, err = gzip.NewReader(b)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read compressed payload: %w", err)
-	}
+	r := snappy.NewReader(b)
 
 	var resB bytes.Buffer
 	_, err = resB.ReadFrom(r)

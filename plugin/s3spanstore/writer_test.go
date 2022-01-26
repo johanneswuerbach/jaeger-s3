@@ -88,11 +88,69 @@ func TestWriteSpan(t *testing.T) {
 		"duration":100000,
 		"tags":{},
 		"servicename":"example-service-1",
-		"spanpayload":"H4sIAAAAAAAA/+ISYEAFgkIcUBazlHBqRWJuQU6qbn5BalFiSWZ+nq6hEQ/H8/MrjrAK7Hjft5HJikVgQS+bFx8Xiig6P0iYSxBmVHFqUVlmcqquIQAAAP//AQAA//+PN0d/egAAAA==",
+		"spanpayload":"/wYAAHNOYVBwWQBZAAB5D7oLeggKEAA2AQAIERIIDRGwAxoTZXhhbXBsZS1vcGVyYXRpb24tMTIMCOfPqMQFELjvjrECOgQQoI0GSg4KMhYAAEo6EAAMUhMKERFLIHNlcnZpY2UtMQ==",
 		"references":[]
 	}`), string(writtenRecord.Data))
 }
 
 func stripFormatting(json string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
+}
+
+func BenchmarkWriteSpan(b *testing.B) {
+	assert := assert.New(b)
+	loggerName := "jaeger-s3"
+
+	logLevel := os.Getenv("GRPC_STORAGE_PLUGIN_LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = hclog.Warn.String()
+	}
+
+	logger := hclog.New(&hclog.LoggerOptions{
+		Level:      hclog.LevelFromString(logLevel),
+		Name:       loggerName,
+		JSONFormat: true,
+	})
+
+	ctx := context.TODO()
+
+	svc := mockPutItemAPI(func(ctx context.Context, params *firehose.PutRecordBatchInput, optFns ...func(*firehose.Options)) (*firehose.PutRecordBatchOutput, error) {
+		return nil, nil
+	})
+
+	writer, err := NewWriter(logger, svc, config.Kinesis{
+		SpanStreamName: "spans-stream",
+	})
+	assert.NoError(err)
+
+	var span model.Span
+	assert.NoError(jsonpb.Unmarshal(strings.NewReader(`{
+		"traceId": "AAAAAAAAAAAAAAAAAAAAEQ==",
+		"spanId": "AAAAAAAAAAM=",
+		"operationName": "example-operation-1",
+		"references": [],
+		"startTime": "2017-01-26T16:46:31.639875Z",
+		"duration": "100000ns",
+		"tags": [],
+		"process": {
+			"serviceName": "example-service-1",
+			"tags": []
+		},
+		"logs": [
+			{
+				"timestamp": "2017-01-26T16:46:31.639875Z",
+				"fields": []
+			},
+			{
+				"timestamp": "2017-01-26T16:46:31.639875Z",
+				"fields": []
+			}
+		]
+	}`), &span))
+
+	// run the WriteSpan function b.N times
+	for n := 0; n < b.N; n++ {
+		assert.NoError(writer.WriteSpan(ctx, &span))
+	}
+	assert.NoError(writer.Close())
 }
