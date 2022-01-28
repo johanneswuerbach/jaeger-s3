@@ -1,7 +1,8 @@
 package config
 
-type Kinesis struct {
-	SpanStreamName string
+type S3 struct {
+	BucketName string
+	Prefix     string
 }
 
 type Athena struct {
@@ -11,6 +12,6 @@ type Athena struct {
 }
 
 type Configuration struct {
-	Kinesis Kinesis
-	Athena  Athena
+	S3     S3
+	Athena Athena
 }

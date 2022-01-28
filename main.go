@@ -16,7 +16,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/athena"
-	"github.com/aws/aws-sdk-go-v2/service/firehose"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 const (
@@ -67,12 +67,12 @@ func main() {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
 
-	firehoseSvc := firehose.NewFromConfig(cfg)
+	s3Svc := s3.NewFromConfig(cfg)
 	athenaSvc := athena.NewFromConfig(cfg)
 
 	logger.Debug("plugin configured")
 
-	s3Plugin, err := plugin.NewS3Plugin(logger, firehoseSvc, configuration.Kinesis, athenaSvc, configuration.Athena)
+	s3Plugin, err := plugin.NewS3Plugin(logger, s3Svc, configuration.S3, athenaSvc, configuration.Athena)
 	if err != nil {
 		log.Fatalf("unable to create plugin, %v", err)
 	}
