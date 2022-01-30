@@ -29,7 +29,7 @@ type S3API interface {
 }
 
 const (
-	PARQUET_CONCURRENCY = 4
+	PARQUET_CONCURRENCY = 1
 )
 
 var (
@@ -136,14 +136,17 @@ func (w *Writer) closeParquetWriter(parquetWriter *writer.ParquetWriter, parquet
 
 func (w *Writer) rotateParquetWriter(ctx context.Context) error {
 	w.bufferMutex.Lock()
-	defer w.bufferMutex.Unlock()
 
 	parquetWriteFile := w.parquetWriteFile
 	parquetWriter := w.parquetWriter
 
 	if err := w.createParquetWriter(ctx); err != nil {
+		w.bufferMutex.Unlock()
+
 		return fmt.Errorf("failed to create parquet writer: %w", err)
 	}
+
+	w.bufferMutex.Unlock()
 
 	if err := w.closeParquetWriter(parquetWriter, parquetWriteFile); err != nil {
 		return fmt.Errorf("failed to close previous parquet writer: %w", err)
@@ -160,6 +163,9 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 		return fmt.Errorf("failed to create span record: %w", err)
 	}
 
+	w.bufferMutex.Lock()
+	defer w.bufferMutex.Unlock()
+
 	if err := w.parquetWriter.Write(spanRecord); err != nil {
 		return fmt.Errorf("failed to write span item: %w", err)
 	}
@@ -169,6 +175,9 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 func (w *Writer) Close() error {
 	w.ticker.Stop()
 	w.done <- true
+
+	w.bufferMutex.Lock()
+	defer w.bufferMutex.Unlock()
 
 	return w.closeParquetWriter(w.parquetWriter, w.parquetWriteFile)
 }

@@ -42,3 +42,6 @@ test: ## Run jaeger plugin tests
 
 lint: ## Lint the code
 	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:v1.42.1 golangci-lint run -v
+
+bench: ## Run jaeger plugin benchmarks
+	docker compose run --rm test go test -benchmem -bench=. ./...
