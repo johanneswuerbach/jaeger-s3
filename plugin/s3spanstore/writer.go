@@ -57,6 +57,7 @@ type Writer struct {
 	parquetWriteFile source.ParquetFile
 	parquetWriter    *writer.ParquetWriter
 	bufferMutex      sync.Mutex
+	ctx              context.Context
 }
 
 func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
@@ -69,9 +70,8 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		logger:     logger,
 		ticker:     time.NewTicker(PARQUET_ROTATION_INTERVAL),
 		done:       make(chan bool),
+		ctx:        context.Background(),
 	}
-
-	ctx := context.Background()
 
 	go func() {
 		for {
@@ -79,7 +79,7 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 			case <-w.done:
 				return
 			case <-w.ticker.C:
-				if err := w.rotateParquetWriter(ctx); err != nil {
+				if err := w.rotateParquetWriter(w.ctx); err != nil {
 					w.logger.Error("failed to rotate parquet writer", err)
 				}
 			}
@@ -89,12 +89,12 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 	return w, nil
 }
 
-func (w *Writer) ensureParquetWriter(ctx context.Context) error {
+func (w *Writer) ensureParquetWriter() error {
 	if w.parquetWriter != nil {
 		return nil
 	}
 
-	writeFile, err := s3v2.NewS3FileWriterWithClient(ctx, w.svc, w.bucketName, w.parquetKey(), nil)
+	writeFile, err := s3v2.NewS3FileWriterWithClient(w.ctx, w.svc, w.bucketName, w.parquetKey(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create parquet s3 client: %w", err)
 	}
@@ -161,7 +161,7 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 	w.bufferMutex.Lock()
 	defer w.bufferMutex.Unlock()
 
-	if err := w.ensureParquetWriter(ctx); err != nil {
+	if err := w.ensureParquetWriter(); err != nil {
 		return fmt.Errorf("failed to ensure parquet writer: %w", err)
 	}
 

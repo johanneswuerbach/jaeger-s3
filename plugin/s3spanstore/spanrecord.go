@@ -93,10 +93,10 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 		SpanKind:      kind,
 		StartTime:     span.StartTime.UnixMilli(),
 		Duration:      span.Duration.Nanoseconds(),
-		// Tags:          kvToMap(searchableTags),
-		ServiceName: span.Process.ServiceName,
-		SpanPayload: spanPayload,
-		// References:    NewSpanRecordReferencesFromSpanReferences(span),
+		Tags:          kvToMap(searchableTags),
+		ServiceName:   span.Process.ServiceName,
+		SpanPayload:   spanPayload,
+		References:    NewSpanRecordReferencesFromSpanReferences(span),
 	}, nil
 }
 
