@@ -46,6 +46,10 @@ func RandStringBytes(n int) string {
 	return string(b)
 }
 
+func S3ParquetKey(prefix, suffix string, t time.Time) string {
+	return prefix + t.Format("2006/01/02/15") + "/" + suffix + ".parquet"
+}
+
 type Writer struct {
 	logger     hclog.Logger
 	svc        S3API
@@ -112,9 +116,7 @@ func (w *Writer) ensureParquetWriter() error {
 }
 
 func (w *Writer) parquetKey() string {
-	t := time.Now()
-
-	return w.prefix + t.Format("2006/01/02/03") + "/" + RandStringBytes(32) + ".parquet"
+	return S3ParquetKey(w.prefix, RandStringBytes(32), time.Now().UTC())
 }
 
 func (w *Writer) closeParquetWriter(parquetWriter *writer.ParquetWriter, parquetWriteFile source.ParquetFile) error {

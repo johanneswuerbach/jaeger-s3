@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gogo/protobuf/jsonpb"
@@ -67,6 +68,18 @@ func NewTestSpan(assert *assert.Assertions) *model.Span {
 	}`), &span))
 
 	return &span
+}
+
+func TestS3ParquetKey(t *testing.T) {
+	assert := assert.New(t)
+
+	testTime1 := time.Date(2021, 1, 30, 6, 34, 58, 123, time.UTC)
+
+	assert.Equal("prefix/2021/01/30/06/random.parquet", S3ParquetKey("prefix/", "random", testTime1))
+
+	testTime2 := time.Date(2021, 1, 30, 18, 34, 58, 123, time.UTC)
+
+	assert.Equal("prefix/2021/01/30/18/random.parquet", S3ParquetKey("prefix/", "random", testTime2))
 }
 
 func TestWriteSpan(t *testing.T) {
