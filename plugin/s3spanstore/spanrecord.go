@@ -22,8 +22,8 @@ type SpanRecord struct {
 	ServiceName   string             `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
 
 	// TODO: Write binary
-	SpanPayload string                   `parquet:"name=span_payload, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	References  *[]*SpanRecordReferences `parquet:"name=references"`
+	SpanPayload string                  `parquet:"name=span_payload, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	References  *[]SpanRecordReferences `parquet:"name=references"`
 }
 
 type SpanRecordReferences struct {
@@ -32,11 +32,17 @@ type SpanRecordReferences struct {
 	RefType int64  `parquet:"name=ref_type, type=INT64"`
 }
 
-func NewSpanRecordReferencesFromSpanReferences(span *model.Span) *[]*SpanRecordReferences {
-	spanRecordReferences := make([]*SpanRecordReferences, len(span.References))
+func NewSpanRecordReferencesFromSpanReferences(span *model.Span) *[]SpanRecordReferences {
+	// Workaround an issue in parquet and athena failing to parse an empty list
+	lenReferences := len(span.References)
+	if lenReferences == 0 {
+		return nil
+	}
+
+	spanRecordReferences := make([]SpanRecordReferences, lenReferences)
 
 	for i, v := range span.References {
-		spanRecordReferences[i] = &SpanRecordReferences{
+		spanRecordReferences[i] = SpanRecordReferences{
 			TraceID: v.TraceID.String(),
 			SpanID:  v.SpanID.String(),
 			RefType: int64(v.RefType),
