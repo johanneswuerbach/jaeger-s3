@@ -115,9 +115,9 @@ func TestWriteSpan(t *testing.T) {
 	// }`), string(writtenRecord.Data))
 }
 
-func stripFormatting(json string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
-}
+// func stripFormatting(json string) string {
+// 	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
+// }
 
 func BenchmarkWriteSpan(b *testing.B) {
 	ctrl := gomock.NewController(b)
