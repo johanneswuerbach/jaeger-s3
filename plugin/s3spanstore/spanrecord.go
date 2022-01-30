@@ -12,41 +12,38 @@ import (
 
 // SpanRecord contains queryable properties from the span and the span as json payload
 type SpanRecord struct {
-	TraceID       string             `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	SpanID        string             `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	OperationName string             `parquet:"name=operation_name, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
-	SpanKind      string             `parquet:"name=span_kind, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
-	StartTime     int64              `parquet:"name=start_time, type=INT64"`
-	Duration      int64              `parquet:"name=duration, type=INT64"`
-	Tags          *map[string]string `parquet:"name=tags, type=MAP, convertedtype=MAP, keytype=BYTE_ARRAY, keyconvertedtype=UTF8, valuetype=BYTE_ARRAY, valueconvertedtype=UTF8"`
-	ServiceName   string             `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	TraceID       string            `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	SpanID        string            `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	OperationName string            `parquet:"name=operation_name, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	SpanKind      string            `parquet:"name=span_kind, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	StartTime     int64             `parquet:"name=start_time, type=INT64"`
+	Duration      int64             `parquet:"name=duration, type=INT64"`
+	Tags          map[string]string `parquet:"name=tags, type=MAP, convertedtype=MAP, keytype=BYTE_ARRAY, keyconvertedtype=UTF8, valuetype=BYTE_ARRAY, valueconvertedtype=UTF8"`
+	ServiceName   string            `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
 
 	// TODO: Write binary
-	SpanPayload string                   `parquet:"name=span_payload, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	References  *[]*SpanRecordReferences `parquet:"name=references"`
+	SpanPayload string                 `parquet:"name=span_payload, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	References  []SpanRecordReferences `parquet:"name=references"`
 }
 
 type SpanRecordReferences struct {
-	TraceID *string `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	SpanID  *string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
-	RefType *int64  `parquet:"name=ref_type, type=INT64"`
+	TraceID string `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	SpanID  string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN"`
+	RefType int32  `parquet:"name=ref_type, type=INT32, convertedtype=INT_8"`
 }
 
-func NewSpanRecordReferencesFromSpanReferences(span *model.Span) *[]*SpanRecordReferences {
-	spanRecordReferences := make([]*SpanRecordReferences, len(span.References))
+func NewSpanRecordReferencesFromSpanReferences(span *model.Span) []SpanRecordReferences {
+	spanRecordReferences := make([]SpanRecordReferences, len(span.References))
 
 	for i, v := range span.References {
-		traceId := v.TraceID.String()
-		spanId := v.SpanID.String()
-		refType := int64(v.RefType)
-		spanRecordReferences[i] = &SpanRecordReferences{
-			TraceID: &traceId,
-			SpanID:  &spanId,
-			RefType: &refType,
+		spanRecordReferences[i] = SpanRecordReferences{
+			TraceID: v.TraceID.String(),
+			SpanID:  v.SpanID.String(),
+			RefType: int32(v.RefType),
 		}
 	}
 
-	return &spanRecordReferences
+	return spanRecordReferences
 }
 
 func EncodeSpanPayload(span *model.Span) (string, error) {
@@ -103,11 +100,11 @@ func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 	}, nil
 }
 
-func kvToMap(kvs []model.KeyValue) *map[string]string {
+func kvToMap(kvs []model.KeyValue) map[string]string {
 	kvMap := map[string]string{}
 	for _, field := range kvs {
 		kvMap[field.Key] = field.AsString()
 	}
 
-	return &kvMap
+	return kvMap
 }
