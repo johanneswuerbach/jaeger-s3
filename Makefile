@@ -40,6 +40,10 @@ test: ## Run jaeger plugin tests
 	docker compose build --build-arg GOARCH=$(GOARCH) test
 	docker compose run --rm test go test -v ./...
 
+test-jaeger-grpc-integration: ## Run jaeger integration tests for grpc plugins
+	docker compose build --build-arg GOARCH=$(GOARCH) test-jaeger-grpc-integration
+	docker compose run --rm test-jaeger-grpc-integration go test -run 'TestGRPCStorage/(GetServices|GetOperations|GetTrace)' -tags=grpc_storage_integration -v -race ./plugin/storage/integration/...
+
 lint: ## Lint the code
 	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:v1.42.1 golangci-lint run -v
 

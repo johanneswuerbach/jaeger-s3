@@ -40,6 +40,23 @@ services:
       - int-mod-cache:/go/pkg/mod
       - int-build-cache:/root/.cache/go-build
 
+  test-jaeger-grpc-integration:
+    build:
+      context: .
+      target: jaeger-grpc-integration
+    environment:
+      - GRPC_STORAGE_PLUGIN_LOG_LEVEL=debug
+      - PLUGIN_BINARY_PATH=/go/bin/s3-plugin
+      - PLUGIN_CONFIG_PATH=/test-config.yml
+      - STORAGE=grpc-plugin
+      - AWS_PROFILE
+      - AWS_REGION
+    volumes:
+      - ~/.aws:/root/.aws
+      - int-mod-cache:/go/pkg/mod
+      - int-build-cache:/root/.cache/go-build
+      - ./test-config.yml:/test-config.yml
+
 volumes:
   int-mod-cache:
   int-build-cache:

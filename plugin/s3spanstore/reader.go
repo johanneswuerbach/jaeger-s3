@@ -61,12 +61,12 @@ func (s *Reader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Tr
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetTrace")
 	defer otSpan.Finish()
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT spanpayload FROM "%s" WHERE traceid = '%s'`, s.cfg.TableName, traceID))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT span_payload FROM "%s" WHERE trace_id = '%s'`, s.cfg.TableName, traceID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
 	if len(result) == 0 {
-		return nil, nil
+		return nil, spanstore.ErrTraceNotFound
 	}
 
 	spans := make([]*model.Span, len(result))
@@ -88,7 +88,7 @@ func (s *Reader) GetServices(ctx context.Context) ([]string, error) {
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer otSpan.Finish()
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT servicename FROM "%s" GROUP BY 1 ORDER BY 1`, s.cfg.TableName))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT service_name FROM "%s" GROUP BY 1 ORDER BY 1`, s.cfg.TableName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -106,12 +106,12 @@ func (s *Reader) GetOperations(ctx context.Context, query spanstore.OperationQue
 	span, _ := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 
-	conditions := fmt.Sprintf(`servicename = '%s'`, query.ServiceName)
+	conditions := fmt.Sprintf(`service_name = '%s'`, query.ServiceName)
 	if query.SpanKind != "" {
-		conditions += fmt.Sprintf(` AND spankind = '%s'`, query.SpanKind)
+		conditions += fmt.Sprintf(` AND span_kind = '%s'`, query.SpanKind)
 	}
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT operationname, spankind FROM "%s" WHERE %s GROUP BY 1, 2 ORDER BY 1, 2`, s.cfg.TableName, conditions))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2 ORDER BY 1, 2`, s.cfg.TableName, conditions))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -132,16 +132,16 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	span, _ := opentracing.StartSpanFromContext(ctx, "FindTraces")
 	defer span.Finish()
 
-	conditions := fmt.Sprintf(`servicename = '%s'`, query.ServiceName)
+	conditions := fmt.Sprintf(`service_name = '%s'`, query.ServiceName)
 	if query.OperationName != "" {
-		conditions += fmt.Sprintf(` AND operationname = '%s'`, query.OperationName)
+		conditions += fmt.Sprintf(` AND operation_name = '%s'`, query.OperationName)
 	}
 
 	// TODO Implement the other query operations
 	// TODO SQL injection
 
 	// Fetch trace ids
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT traceid FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, s.cfg.TableName, conditions, query.NumTraces))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, s.cfg.TableName, conditions, query.NumTraces))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	}
 
 	// Fetch span details
-	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT traceid, spanpayload FROM "%s" WHERE traceid IN ('%s')`, s.cfg.TableName, strings.Join(traceIds, `', '`)))
+	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id, span_payload FROM "%s" WHERE trace_id IN ('%s')`, s.cfg.TableName, strings.Join(traceIds, `', '`)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}

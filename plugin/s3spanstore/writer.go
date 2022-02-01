@@ -32,10 +32,6 @@ const (
 	PARQUET_CONCURRENCY = 1
 )
 
-var (
-	PARQUET_ROTATION_INTERVAL = 60 * time.Second
-)
-
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func RandStringBytes(n int) string {
@@ -67,12 +63,21 @@ type Writer struct {
 func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
 	rand.Seed(time.Now().UnixNano())
 
+	bufferDuration := time.Second * 60
+	if s3Config.BufferDuration != "" {
+		duration, err := time.ParseDuration(s3Config.BufferDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
+		}
+		bufferDuration = duration
+	}
+
 	w := &Writer{
 		svc:        svc,
 		bucketName: s3Config.BucketName,
 		prefix:     s3Config.Prefix,
 		logger:     logger,
-		ticker:     time.NewTicker(PARQUET_ROTATION_INTERVAL),
+		ticker:     time.NewTicker(bufferDuration),
 		done:       make(chan bool),
 		ctx:        context.Background(),
 	}

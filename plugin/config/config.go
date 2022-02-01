@@ -1,8 +1,9 @@
 package config
 
 type S3 struct {
-	BucketName string
-	Prefix     string
+	BucketName     string
+	Prefix         string
+	BufferDuration string
 }
 
 type Athena struct {
