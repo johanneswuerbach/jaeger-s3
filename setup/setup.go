@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/athena"
+	athenaTypes "github.com/aws/aws-sdk-go-v2/service/athena/types"
 	"github.com/aws/aws-sdk-go-v2/service/glue"
-	"github.com/aws/aws-sdk-go-v2/service/glue/types"
+	glueTypes "github.com/aws/aws-sdk-go-v2/service/glue/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -23,7 +26,7 @@ func main() {
 	}
 
 	s3Svc := s3.NewFromConfig(cfg)
-	// athenaSvc := athena.NewFromConfig(cfg)
+	athenaSvc := athena.NewFromConfig(cfg)
 	glueSvc := glue.NewFromConfig(cfg)
 
 	bucketName := "jaeger-s3-test"
@@ -44,18 +47,33 @@ func main() {
 	}
 
 	_, err = glueSvc.CreateDatabase(ctx, &glue.CreateDatabaseInput{
-		DatabaseInput: &types.DatabaseInput{
+		DatabaseInput: &glueTypes.DatabaseInput{
 			Name: aws.String("default"),
 		},
 	})
 	if err != nil {
-		log.Fatalf("unable to create s3 bucket, %v", err)
+		var bne *glueTypes.AlreadyExistsException
+		if !errors.As(err, &bne) {
+			log.Fatalf("unable to create glue database, %v", err)
+		}
+	}
+
+	_, err = glueSvc.DeleteTable(ctx, &glue.DeleteTableInput{
+		DatabaseName: aws.String("default"),
+
+		Name: aws.String("jaeger"),
+	})
+	if err != nil {
+		var bne *glueTypes.EntityNotFoundException
+		if !errors.As(err, &bne) {
+			log.Fatalf("unable to delete glue table, %v", err)
+		}
 	}
 
 	_, err = glueSvc.CreateTable(ctx, &glue.CreateTableInput{
 		DatabaseName: aws.String("default"),
 
-		TableInput: &types.TableInput{
+		TableInput: &glueTypes.TableInput{
 			Name: aws.String("jaeger"),
 
 			Parameters: map[string]string{
@@ -69,26 +87,26 @@ func main() {
 				"storage.location.template":         fmt.Sprintf("s3://%s/spans/${datehour}/", bucketName),
 			},
 
-			PartitionKeys: []types.Column{
+			PartitionKeys: []glueTypes.Column{
 				{
 					Name: aws.String("datehour"),
 					Type: aws.String("string"),
 				},
 			},
 
-			StorageDescriptor: &types.StorageDescriptor{
+			StorageDescriptor: &glueTypes.StorageDescriptor{
 				Location:     aws.String(fmt.Sprintf("s3://%s/spans/", bucketName)),
 				InputFormat:  aws.String("org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"),
 				OutputFormat: aws.String("org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"),
 
-				SerdeInfo: &types.SerDeInfo{
+				SerdeInfo: &glueTypes.SerDeInfo{
 					SerializationLibrary: aws.String("org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"),
 					Parameters: map[string]string{
 						"serialization.format": "1",
 					},
 				},
 
-				Columns: []types.Column{
+				Columns: []glueTypes.Column{
 					{
 						Name: aws.String("trace_id"),
 						Type: aws.String("string"),
@@ -135,5 +153,17 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("unable to create s3 bucket, %v", err)
+	}
+
+	_, err = athenaSvc.CreateWorkGroup(ctx, &athena.CreateWorkGroupInput{
+		Name: aws.String("jaeger"),
+		Configuration: &athenaTypes.WorkGroupConfiguration{
+			ResultConfiguration: &athenaTypes.ResultConfiguration{
+				OutputLocation: aws.String(fmt.Sprintf("s3://%s/", bucketNameResults)),
+			},
+		},
+	})
+	if err != nil {
+		log.Fatalf("unable to create jaeger work group, %v", err)
 	}
 }

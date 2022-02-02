@@ -207,6 +207,7 @@ func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.R
 		ResultConfiguration: &types.ResultConfiguration{
 			OutputLocation: &s.cfg.OutputLocation,
 		},
+		WorkGroup: &s.cfg.WorkGroup,
 	})
 
 	if err != nil {

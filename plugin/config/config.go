@@ -10,6 +10,7 @@ type S3 struct {
 type Athena struct {
 	DatabaseName   string
 	TableName      string
+	WorkGroup      string
 	OutputLocation string
 }
 
