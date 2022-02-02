@@ -13,7 +13,7 @@ FROM code AS test
 
 FROM base AS jaeger-grpc-integration
 ARG GOARCH=amd64
-RUN git clone --depth=1 --single-branch --branch=v1.30.0 https://github.com/jaegertracing/jaeger.git /jaeger
+RUN git clone --depth=1 --single-branch --branch=fix-find-traces-polling https://github.com/johanneswuerbach/jaeger.git /jaeger
 WORKDIR /jaeger
 COPY --from=build /src/s3-plugin /go/bin
 

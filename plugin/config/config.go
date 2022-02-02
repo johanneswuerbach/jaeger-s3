@@ -4,6 +4,7 @@ type S3 struct {
 	BucketName     string
 	Prefix         string
 	BufferDuration string
+	EmptyBucket    bool
 }
 
 type Athena struct {

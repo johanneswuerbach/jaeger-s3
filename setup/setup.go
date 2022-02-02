@@ -127,7 +127,7 @@ func main() {
 					},
 					{
 						Name: aws.String("references"),
-						Type: aws.String("array<struct<traceid:string,spanid:string,reftype:tinyint>>"),
+						Type: aws.String("array<struct<trace_id:string,span_id:string,ref_type:tinyint>>"),
 					},
 				},
 			},

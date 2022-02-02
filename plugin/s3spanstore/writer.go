@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
@@ -26,10 +27,13 @@ type S3API interface {
 	AbortMultipartUpload(context.Context, *s3.AbortMultipartUploadInput, ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error)
 	GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
 const (
 	PARQUET_CONCURRENCY = 1
+	PARTION_FORMAT      = "2006/01/02/15"
 )
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -43,7 +47,7 @@ func RandStringBytes(n int) string {
 }
 
 func S3ParquetKey(prefix, suffix string, t time.Time) string {
-	return prefix + t.Format("2006/01/02/15") + "/" + suffix + ".parquet"
+	return prefix + t.Format(PARTION_FORMAT) + "/" + suffix + ".parquet"
 }
 
 type Writer struct {
@@ -60,6 +64,31 @@ type Writer struct {
 	ctx              context.Context
 }
 
+func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
+	params := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+	}
+
+	paginator := s3.NewListObjectsV2Paginator(svc, params)
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("failed fetch page: %w", err)
+		}
+		for _, value := range output.Contents {
+			if _, err := svc.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    value.Key,
+			}); err != nil {
+				return fmt.Errorf("failed to delete object: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
 	rand.Seed(time.Now().UnixNano())
 
@@ -72,6 +101,14 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		bufferDuration = duration
 	}
 
+	ctx := context.Background()
+
+	if s3Config.EmptyBucket {
+		if err := EmptyBucket(ctx, svc, s3Config.BucketName); err != nil {
+			return nil, fmt.Errorf("failed to empty s3 bucket: %w", err)
+		}
+	}
+
 	w := &Writer{
 		svc:        svc,
 		bucketName: s3Config.BucketName,
@@ -79,7 +116,7 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		logger:     logger,
 		ticker:     time.NewTicker(bufferDuration),
 		done:       make(chan bool),
-		ctx:        context.Background(),
+		ctx:        ctx,
 	}
 
 	go func() {

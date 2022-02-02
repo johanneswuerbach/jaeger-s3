@@ -72,6 +72,28 @@ func EncodeSpanPayload(span *model.Span) (string, error) {
 	return b.String(), nil
 }
 
+func DecodeSpanPayload(payload string) (*model.Span, error) {
+	payloadBytes, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode payload: %w", err)
+	}
+
+	b := bytes.NewBuffer(payloadBytes)
+	r := snappy.NewReader(b)
+
+	var resB bytes.Buffer
+	_, err = resB.ReadFrom(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress payload: %w", err)
+	}
+
+	span := &model.Span{}
+	if err := proto.Unmarshal(resB.Bytes(), span); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal span: %w", err)
+	}
+	return span, nil
+}
+
 func NewSpanRecordFromSpan(span *model.Span) (*SpanRecord, error) {
 	searchableTags := append([]model.KeyValue{}, span.Tags...)
 	searchableTags = append(searchableTags, span.Process.Tags...)
