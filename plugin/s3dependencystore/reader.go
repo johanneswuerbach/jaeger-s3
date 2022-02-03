@@ -48,7 +48,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 				unnested_references.reference.trace_id as ref_trace_id,
 				unnested_references.reference.span_id as ref_span_id
 			FROM %s as base
-			CROSS JOIN UNNEST(jaeger.references) AS unnested_references (reference)
+			CROSS JOIN UNNEST(base.references) AS unnested_references (reference)
 		)
 
 		SELECT spans_with_references.service_name as child, jaeger.service_name as parent, COUNT(*) as callcount
