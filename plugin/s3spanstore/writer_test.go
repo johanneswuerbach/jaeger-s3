@@ -75,11 +75,11 @@ func TestS3ParquetKey(t *testing.T) {
 
 	testTime1 := time.Date(2021, 1, 30, 6, 34, 58, 123, time.UTC)
 
-	assert.Equal("prefix/2021/01/30/06/random.parquet", S3ParquetKey("prefix/", "random", testTime1))
+	assert.Equal("prefix/2021/01/30/06/random.parquet", S3ParquetKey("prefix/", "random", S3PartitionKey(testTime1)))
 
 	testTime2 := time.Date(2021, 1, 30, 18, 34, 58, 123, time.UTC)
 
-	assert.Equal("prefix/2021/01/30/18/random.parquet", S3ParquetKey("prefix/", "random", testTime2))
+	assert.Equal("prefix/2021/01/30/18/random.parquet", S3ParquetKey("prefix/", "random", S3PartitionKey(testTime2)))
 }
 
 func TestWriteSpan(t *testing.T) {
@@ -118,6 +118,32 @@ func TestWriteSpan(t *testing.T) {
 // func stripFormatting(json string) string {
 // 	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
 // }
+
+func TestWriteSpanAndRotate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := mocks.NewMockS3API(ctrl)
+	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&s3.PutObjectOutput{}, nil).Times(2)
+
+	assert := assert.New(t)
+	ctx := context.TODO()
+
+	writer := NewTestWriter(ctx, assert, mockSvc)
+
+	span := NewTestSpan(assert)
+
+	assert.NoError(writer.WriteSpan(ctx, span))
+
+	assert.NoError(writer.WriteSpan(ctx, span))
+
+	assert.NoError(writer.rotateParquetWriters())
+
+	assert.NoError(writer.WriteSpan(ctx, span))
+
+	assert.NoError(writer.Close())
+}
 
 func BenchmarkWriteSpan(b *testing.B) {
 	ctrl := gomock.NewController(b)

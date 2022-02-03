@@ -12,6 +12,7 @@ type Athena struct {
 	TableName      string
 	WorkGroup      string
 	OutputLocation string
+	MaxTimeframe   string
 }
 
 type Configuration struct {

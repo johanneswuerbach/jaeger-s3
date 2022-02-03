@@ -164,6 +164,9 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("unable to create jaeger work group, %v", err)
+		var bne *athenaTypes.InvalidRequestException
+		if !errors.As(err, &bne) {
+			log.Fatalf("unable to create jaeger work group, %v", err)
+		}
 	}
 }

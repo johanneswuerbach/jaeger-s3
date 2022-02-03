@@ -46,8 +46,17 @@ func RandStringBytes(n int) string {
 	return string(b)
 }
 
-func S3ParquetKey(prefix, suffix string, t time.Time) string {
-	return prefix + t.Format(PARTION_FORMAT) + "/" + suffix + ".parquet"
+func S3ParquetKey(prefix, suffix string, datehour string) string {
+	return prefix + datehour + "/" + suffix + ".parquet"
+}
+
+func S3PartitionKey(t time.Time) string {
+	return t.Format(PARTION_FORMAT)
+}
+
+type ParquetRef struct {
+	parquetWriteFile source.ParquetFile
+	parquetWriter    *writer.ParquetWriter
 }
 
 type Writer struct {
@@ -58,10 +67,9 @@ type Writer struct {
 	ticker     *time.Ticker
 	done       chan bool
 
-	parquetWriteFile source.ParquetFile
-	parquetWriter    *writer.ParquetWriter
-	bufferMutex      sync.Mutex
-	ctx              context.Context
+	parquetWriterRefs map[string]*ParquetRef
+	bufferMutex       sync.Mutex
+	ctx               context.Context
 }
 
 func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
@@ -110,13 +118,14 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 	}
 
 	w := &Writer{
-		svc:        svc,
-		bucketName: s3Config.BucketName,
-		prefix:     s3Config.Prefix,
-		logger:     logger,
-		ticker:     time.NewTicker(bufferDuration),
-		done:       make(chan bool),
-		ctx:        ctx,
+		svc:               svc,
+		bucketName:        s3Config.BucketName,
+		prefix:            s3Config.Prefix,
+		logger:            logger,
+		ticker:            time.NewTicker(bufferDuration),
+		done:              make(chan bool),
+		parquetWriterRefs: map[string]*ParquetRef{},
+		ctx:               ctx,
 	}
 
 	go func() {
@@ -125,7 +134,7 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 			case <-w.done:
 				return
 			case <-w.ticker.C:
-				if err := w.rotateParquetWriter(w.ctx); err != nil {
+				if err := w.rotateParquetWriters(); err != nil {
 					w.logger.Error("failed to rotate parquet writer", err)
 				}
 			}
@@ -135,41 +144,43 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 	return w, nil
 }
 
-func (w *Writer) ensureParquetWriter() error {
-	if w.parquetWriter != nil {
-		return nil
+func (w *Writer) getParquetWriter(datehour string) (*writer.ParquetWriter, error) {
+	if w.parquetWriterRefs[datehour] != nil {
+		return w.parquetWriterRefs[datehour].parquetWriter, nil
 	}
 
-	writeFile, err := s3v2.NewS3FileWriterWithClient(w.ctx, w.svc, w.bucketName, w.parquetKey(), nil)
+	writeFile, err := s3v2.NewS3FileWriterWithClient(w.ctx, w.svc, w.bucketName, w.parquetKey(datehour), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create parquet s3 client: %w", err)
+		return nil, fmt.Errorf("failed to create parquet s3 client: %w", err)
 	}
-	w.parquetWriteFile = writeFile
 
 	parquetWriter, err := writer.NewParquetWriter(writeFile, new(SpanRecord), PARQUET_CONCURRENCY)
 	if err != nil {
-		w.parquetWriteFile.Close()
-		w.parquetWriteFile = nil
-		return fmt.Errorf("failed to create parquet writer: %w", err)
+		writeFile.Close()
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
-	w.parquetWriter = parquetWriter
 
-	return nil
+	w.parquetWriterRefs[datehour] = &ParquetRef{
+		parquetWriteFile: writeFile,
+		parquetWriter:    parquetWriter,
+	}
+
+	return parquetWriter, nil
 }
 
-func (w *Writer) parquetKey() string {
-	return S3ParquetKey(w.prefix, RandStringBytes(32), time.Now().UTC())
+func (w *Writer) parquetKey(datehour string) string {
+	return S3ParquetKey(w.prefix, RandStringBytes(32), datehour)
 }
 
-func (w *Writer) closeParquetWriter(parquetWriter *writer.ParquetWriter, parquetWriteFile source.ParquetFile) error {
-	if parquetWriter != nil {
-		if err := parquetWriter.WriteStop(); err != nil {
+func (w *Writer) closeParquetWriter(parquetRef *ParquetRef) error {
+	if parquetRef.parquetWriter != nil {
+		if err := parquetRef.parquetWriter.WriteStop(); err != nil {
 			return fmt.Errorf("parquet write stop error: %w", err)
 		}
 	}
 
-	if parquetWriteFile != nil {
-		if err := parquetWriteFile.Close(); err != nil {
+	if parquetRef.parquetWriteFile != nil {
+		if err := parquetRef.parquetWriteFile.Close(); err != nil {
 			return fmt.Errorf("parquet file write close error: %w", err)
 		}
 	}
@@ -177,18 +188,22 @@ func (w *Writer) closeParquetWriter(parquetWriter *writer.ParquetWriter, parquet
 	return nil
 }
 
-func (w *Writer) rotateParquetWriter(ctx context.Context) error {
+func (w *Writer) rotateParquetWriters() error {
 	w.bufferMutex.Lock()
 
-	parquetWriteFile := w.parquetWriteFile
-	parquetWriter := w.parquetWriter
-	w.parquetWriteFile = nil
-	w.parquetWriter = nil
+	writerRefs := w.parquetWriterRefs
+	w.parquetWriterRefs = map[string]*ParquetRef{}
 
 	w.bufferMutex.Unlock()
 
-	if err := w.closeParquetWriter(parquetWriter, parquetWriteFile); err != nil {
-		return fmt.Errorf("failed to close previous parquet writer: %w", err)
+	return w.closeParquetWriters(writerRefs)
+}
+
+func (w *Writer) closeParquetWriters(parquetWriterRefs map[string]*ParquetRef) error {
+	for _, writerRef := range parquetWriterRefs {
+		if err := w.closeParquetWriter(writerRef); err != nil {
+			return fmt.Errorf("failed to close previous parquet writer: %w", err)
+		}
 	}
 
 	return nil
@@ -205,11 +220,14 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 	w.bufferMutex.Lock()
 	defer w.bufferMutex.Unlock()
 
-	if err := w.ensureParquetWriter(); err != nil {
-		return fmt.Errorf("failed to ensure parquet writer: %w", err)
+	spanDatehour := S3PartitionKey(span.StartTime)
+
+	parquetWriter, err := w.getParquetWriter(spanDatehour)
+	if err != nil {
+		return fmt.Errorf("failed to get parquet writer: %w", err)
 	}
 
-	if err := w.parquetWriter.Write(spanRecord); err != nil {
+	if err := parquetWriter.Write(spanRecord); err != nil {
 		return fmt.Errorf("failed to write span item: %w", err)
 	}
 	return nil
@@ -222,5 +240,5 @@ func (w *Writer) Close() error {
 	w.bufferMutex.Lock()
 	defer w.bufferMutex.Unlock()
 
-	return w.closeParquetWriter(w.parquetWriter, w.parquetWriteFile)
+	return w.closeParquetWriters(w.parquetWriterRefs)
 }

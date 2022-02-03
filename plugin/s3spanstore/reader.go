@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,30 +17,50 @@ import (
 	"github.com/opentracing/opentracing-go"
 )
 
-func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) *Reader {
-	return &Reader{
-		svc:    svc,
-		cfg:    cfg,
-		logger: logger,
+func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Reader, error) {
+	maxTimeframe, err := time.ParseDuration(cfg.MaxTimeframe)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
 	}
+
+	return &Reader{
+		svc:          svc,
+		cfg:          cfg,
+		logger:       logger,
+		maxTimeframe: maxTimeframe,
+	}, nil
 }
 
 type Reader struct {
-	logger hclog.Logger
-	svc    *athena.Client
-	cfg    config.Athena
+	logger       hclog.Logger
+	svc          *athena.Client
+	cfg          config.Athena
+	maxTimeframe time.Duration
 }
 
 const (
 	ATHENA_TIMEFORMAT = "2006-01-02 15:04:05.999"
 )
 
+func (r *Reader) DefaultMaxTime() time.Time {
+	return time.Now().UTC()
+}
+
+func (r *Reader) DefaultMinTime() time.Time {
+	return r.DefaultMaxTime().Add(-r.maxTimeframe)
+}
+
 func (s *Reader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Trace, error) {
 	s.logger.Trace("GetTrace", traceID.String())
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetTrace")
 	defer otSpan.Finish()
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE trace_id = '%s'`, s.cfg.TableName, traceID))
+	conditions := []string{
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
+		fmt.Sprintf(`trace_id = '%s'`, traceID),
+	}
+
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE %s`, s.cfg.TableName, strings.Join(conditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -66,7 +87,11 @@ func (s *Reader) GetServices(ctx context.Context) ([]string, error) {
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer otSpan.Finish()
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT service_name FROM "%s" GROUP BY 1 ORDER BY 1`, s.cfg.TableName))
+	conditions := []string{
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
+	}
+
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT service_name FROM "%s" WHERE %s GROUP BY 1 ORDER BY 1`, s.cfg.TableName, strings.Join(conditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -85,7 +110,10 @@ func (s *Reader) GetOperations(ctx context.Context, query spanstore.OperationQue
 	defer span.Finish()
 
 	// TODO Prevent SQL injections
-	conditions := []string{fmt.Sprintf(`service_name = '%s'`, query.ServiceName)}
+	conditions := []string{
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
+		fmt.Sprintf(`service_name = '%s'`, query.ServiceName),
+	}
 
 	if query.SpanKind != "" {
 		conditions = append(conditions, fmt.Sprintf(`span_kind = '%s'`, query.SpanKind))
@@ -123,16 +151,16 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 		conditions = append(conditions, fmt.Sprintf(`tags['%s'] = '%s'`, key, value))
 	}
 
-	if !query.StartTimeMin.IsZero() && !query.StartTimeMax.IsZero() {
-		// conditions = append(conditions, fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Format(PARTION_FORMAT), query.StartTimeMax.Format(PARTION_FORMAT)))
-		conditions = append(conditions, fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, query.StartTimeMin.Format(ATHENA_TIMEFORMAT), query.StartTimeMax.Format(ATHENA_TIMEFORMAT)))
-	} else if !query.StartTimeMin.IsZero() {
-		// conditions = append(conditions, fmt.Sprintf(`datehour >= '%s'`, query.StartTimeMin.Format(PARTION_FORMAT)))
-		conditions = append(conditions, fmt.Sprintf(`start_time >= timestamp '%s'`, query.StartTimeMin.Format(ATHENA_TIMEFORMAT)))
-	} else if !query.StartTimeMax.IsZero() {
-		// conditions = append(conditions, fmt.Sprintf(`datehour <= '%s'`, query.StartTimeMax.Format(PARTION_FORMAT)))
-		conditions = append(conditions, fmt.Sprintf(`start_time <= timestamp '%s'`, query.StartTimeMax.Format(ATHENA_TIMEFORMAT)))
+	if query.StartTimeMin.IsZero() {
+		query.StartTimeMin = s.DefaultMinTime()
 	}
+
+	if query.StartTimeMax.IsZero() {
+		query.StartTimeMax = s.DefaultMaxTime()
+	}
+
+	conditions = append(conditions, fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Format(PARTION_FORMAT), query.StartTimeMax.Format(PARTION_FORMAT)))
+	conditions = append(conditions, fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, query.StartTimeMin.Format(ATHENA_TIMEFORMAT), query.StartTimeMax.Format(ATHENA_TIMEFORMAT)))
 
 	if query.DurationMin.String() != "0s" && query.DurationMax.String() != "0s" {
 		conditions = append(conditions, fmt.Sprintf(`duration BETWEEN %d AND %d`, query.DurationMin.Nanoseconds(), query.DurationMax.Nanoseconds()))
@@ -196,6 +224,57 @@ func (s *Reader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryPa
 	defer span.Finish()
 
 	return nil, errors.New("not implemented")
+}
+
+func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
+	r.logger.Debug("GetDependencies")
+	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetDependencies")
+	defer otSpan.Finish()
+
+	startTs := endTs.Add(-lookback)
+
+	conditions := []string{
+		fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, startTs.Format(ATHENA_TIMEFORMAT), endTs.Format(ATHENA_TIMEFORMAT)),
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, startTs.Format(PARTION_FORMAT), endTs.Format(PARTION_FORMAT)),
+	}
+
+	result, err := r.queryAthena(ctx, fmt.Sprintf(`
+		WITH spans_with_references AS (
+			SELECT
+				base.service_name,
+				base.trace_id,
+				base.span_id,
+				unnested_references.reference.trace_id as ref_trace_id,
+				unnested_references.reference.span_id as ref_span_id
+			FROM %s as base
+			CROSS JOIN UNNEST(base.references) AS unnested_references (reference)
+		)
+
+		SELECT jaeger.service_name as parent, spans_with_references.service_name as child, COUNT(*) as callcount
+			FROM spans_with_references
+			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
+			WHERE %s
+			GROUP BY 1, 2
+	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query athena: %w", err)
+	}
+
+	dependencyLinks := make([]model.DependencyLink, len(result))
+	for i, v := range result {
+		callCount, err := strconv.ParseUint(*v.Data[2].VarCharValue, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse call count: %w", err)
+		}
+
+		dependencyLinks[i] = model.DependencyLink{
+			Parent:    *v.Data[0].VarCharValue,
+			Child:     *v.Data[1].VarCharValue,
+			CallCount: callCount,
+		}
+	}
+
+	return dependencyLinks, nil
 }
 
 func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
