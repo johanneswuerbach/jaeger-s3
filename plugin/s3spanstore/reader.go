@@ -185,7 +185,12 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	}
 
 	// Fetch span details
-	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE trace_id IN ('%s')`, s.cfg.TableName, strings.Join(traceIds, `', '`)))
+	spanConditions := []string{
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
+		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIds, `', '`)),
+	}
+
+	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, s.cfg.TableName, strings.Join(spanConditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
