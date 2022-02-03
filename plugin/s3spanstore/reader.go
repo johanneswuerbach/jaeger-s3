@@ -16,12 +16,12 @@ import (
 	"github.com/opentracing/opentracing-go"
 )
 
-func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Reader, error) {
+func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) *Reader {
 	return &Reader{
 		svc:    svc,
 		cfg:    cfg,
 		logger: logger,
-	}, nil
+	}
 }
 
 type Reader struct {

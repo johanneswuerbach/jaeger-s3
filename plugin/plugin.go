@@ -9,6 +9,7 @@ import (
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
+	"github.com/johanneswuerbach/jaeger-s3/plugin/s3dependencystore"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore"
 )
 
@@ -18,22 +19,18 @@ func NewS3Plugin(logger hclog.Logger, s3Svc *s3.Client, s3Config config.S3, athe
 		return nil, fmt.Errorf("failed to create span writer, %v", err)
 	}
 
-	spanReader, err := s3spanstore.NewReader(logger, athenaSvc, athenaConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create span writer, %v", err)
-	}
-
 	return &S3Plugin{
-		spanWriter: spanWriter,
-		spanReader: spanReader,
-
-		logger: logger,
+		spanWriter:       spanWriter,
+		spanReader:       s3spanstore.NewReader(logger, athenaSvc, athenaConfig),
+		dependencyReader: s3dependencystore.NewReader(logger, athenaSvc, athenaConfig),
+		logger:           logger,
 	}, nil
 }
 
 type S3Plugin struct {
-	spanWriter *s3spanstore.Writer
-	spanReader *s3spanstore.Reader
+	spanWriter       *s3spanstore.Writer
+	spanReader       *s3spanstore.Reader
+	dependencyReader *s3dependencystore.Reader
 
 	logger hclog.Logger
 }
@@ -47,5 +44,5 @@ func (h *S3Plugin) SpanReader() spanstore.Reader {
 }
 
 func (h *S3Plugin) DependencyReader() dependencystore.Reader {
-	return nil
+	return h.dependencyReader
 }
