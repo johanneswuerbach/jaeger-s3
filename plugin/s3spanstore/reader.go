@@ -18,24 +18,24 @@ import (
 )
 
 func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Reader, error) {
-	maxTimeframe, err := time.ParseDuration(cfg.MaxTimeframe)
+	maxSpanAge, err := time.ParseDuration(cfg.MaxSpanAge)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
 	}
 
 	return &Reader{
-		svc:          svc,
-		cfg:          cfg,
-		logger:       logger,
-		maxTimeframe: maxTimeframe,
+		svc:        svc,
+		cfg:        cfg,
+		logger:     logger,
+		maxSpanAge: maxSpanAge,
 	}, nil
 }
 
 type Reader struct {
-	logger       hclog.Logger
-	svc          *athena.Client
-	cfg          config.Athena
-	maxTimeframe time.Duration
+	logger     hclog.Logger
+	svc        *athena.Client
+	cfg        config.Athena
+	maxSpanAge time.Duration
 }
 
 const (
@@ -47,7 +47,7 @@ func (r *Reader) DefaultMaxTime() time.Time {
 }
 
 func (r *Reader) DefaultMinTime() time.Time {
-	return r.DefaultMaxTime().Add(-r.maxTimeframe)
+	return r.DefaultMaxTime().Add(-r.maxSpanAge)
 }
 
 func (s *Reader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Trace, error) {

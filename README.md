@@ -263,6 +263,7 @@ data:
       tableName: jaeger
       outputLocation: s3://my-jaeger-s3-bucket-athena-results/
       workGroup: jaeger
+      maxSpanAge: 336h
 
 ---
 apiVersion: v1
@@ -309,7 +310,7 @@ spec:
   storage:
     type: grpc-plugin
     grpcPlugin:
-      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.1.1
+      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.1.5
     options:
       grpc-storage-plugin:
         binary: /plugin/jaeger-s3
