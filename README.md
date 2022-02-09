@@ -264,6 +264,8 @@ data:
       outputLocation: s3://my-jaeger-s3-bucket-athena-results/
       workGroup: jaeger
       maxSpanAge: 336h
+      dependenciesQueryTtl: 6h
+      servicesQueryTtl: 60s
 
 ---
 apiVersion: v1

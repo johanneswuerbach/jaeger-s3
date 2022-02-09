@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
@@ -15,6 +16,7 @@ import (
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
 	"github.com/opentracing/opentracing-go"
+	"golang.org/x/sync/errgroup"
 )
 
 func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Reader, error) {
@@ -23,19 +25,33 @@ func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Rea
 		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
 	}
 
+	dependenciesQueryTTL, err := time.ParseDuration(cfg.DependenciesQueryTTL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse dependencies query ttl: %w", err)
+	}
+
+	servicesQueryTTL, err := time.ParseDuration(cfg.ServicesQueryTTL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse services query ttl: %w", err)
+	}
+
 	return &Reader{
-		svc:        svc,
-		cfg:        cfg,
-		logger:     logger,
-		maxSpanAge: maxSpanAge,
+		svc:                  svc,
+		cfg:                  cfg,
+		logger:               logger,
+		maxSpanAge:           maxSpanAge,
+		dependenciesQueryTTL: dependenciesQueryTTL,
+		servicesQueryTTL:     servicesQueryTTL,
 	}, nil
 }
 
 type Reader struct {
-	logger     hclog.Logger
-	svc        *athena.Client
-	cfg        config.Athena
-	maxSpanAge time.Duration
+	logger               hclog.Logger
+	svc                  *athena.Client
+	cfg                  config.Athena
+	maxSpanAge           time.Duration
+	dependenciesQueryTTL time.Duration
+	servicesQueryTTL     time.Duration
 }
 
 const (
@@ -87,18 +103,22 @@ func (s *Reader) GetServices(ctx context.Context) ([]string, error) {
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "GetServices")
 	defer otSpan.Finish()
 
-	conditions := []string{
-		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
-	}
-
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT service_name FROM "%s" WHERE %s GROUP BY 1 ORDER BY 1`, s.cfg.TableName, strings.Join(conditions, " AND ")))
+	result, err := s.getServicesAndOperations(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query athena: %w", err)
+		return nil, fmt.Errorf("failed to query services and operations: %w", err)
 	}
 
-	serviceNames := make([]string, len(result))
-	for i, v := range result {
-		serviceNames[i] = *v.Data[0].VarCharValue
+	serviceNameMap := map[string]bool{}
+	for _, v := range result {
+		serviceName := *v.Data[0].VarCharValue
+		if !serviceNameMap[serviceName] {
+			serviceNameMap[serviceName] = true
+		}
+	}
+
+	serviceNames := make([]string, 0, len(serviceNameMap))
+	for serviceName, _ := range serviceNameMap {
+		serviceNames = append(serviceNames, serviceName)
 	}
 
 	return serviceNames, nil
@@ -109,30 +129,41 @@ func (s *Reader) GetOperations(ctx context.Context, query spanstore.OperationQue
 	span, _ := opentracing.StartSpanFromContext(ctx, "GetOperations")
 	defer span.Finish()
 
-	// TODO Prevent SQL injections
+	result, err := s.getServicesAndOperations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query services and operations: %w", err)
+	}
+
+	operations := []spanstore.Operation{}
+	for _, v := range result {
+		if query.ServiceName != *v.Data[0].VarCharValue {
+			continue
+		}
+
+		if query.SpanKind != "" && query.SpanKind != *v.Data[2].VarCharValue {
+			continue
+		}
+
+		operations = append(operations, spanstore.Operation{
+			Name:     *v.Data[1].VarCharValue,
+			SpanKind: *v.Data[2].VarCharValue,
+		})
+	}
+
+	return operations, nil
+}
+
+func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, error) {
 	conditions := []string{
-		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
-		fmt.Sprintf(`service_name = '%s'`, query.ServiceName),
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, r.DefaultMinTime().Format(PARTION_FORMAT), r.DefaultMaxTime().Format(PARTION_FORMAT)),
 	}
 
-	if query.SpanKind != "" {
-		conditions = append(conditions, fmt.Sprintf(`span_kind = '%s'`, query.SpanKind))
-	}
-
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2 ORDER BY 1, 2`, s.cfg.TableName, strings.Join(conditions, " AND ")))
+	result, err := r.queryAthenaCached(ctx, fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")), r.servicesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
 
-	operations := make([]spanstore.Operation, len(result))
-	for i, v := range result {
-		operations[i] = spanstore.Operation{
-			Name:     *v.Data[0].VarCharValue,
-			SpanKind: *v.Data[1].VarCharValue,
-		}
-	}
-
-	return operations, nil
+	return result, nil
 }
 
 func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
@@ -243,7 +274,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, startTs.Format(PARTION_FORMAT), endTs.Format(PARTION_FORMAT)),
 	}
 
-	result, err := r.queryAthena(ctx, fmt.Sprintf(`
+	result, err := r.queryAthenaCached(ctx, fmt.Sprintf(`
 		WITH spans_with_references AS (
 			SELECT
 				base.service_name,
@@ -260,7 +291,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
 			WHERE %s
 			GROUP BY 1, 2
-	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")))
+	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), r.dependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -280,6 +311,85 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 	}
 
 	return dependencyLinks, nil
+}
+
+func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl time.Duration) ([]types.Row, error) {
+	paginator := athena.NewListQueryExecutionsPaginator(r.svc, &athena.ListQueryExecutionsInput{
+		WorkGroup: &r.cfg.WorkGroup,
+	})
+	queryExecutionIds := []string{}
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get athena query result: %w", err)
+		}
+
+		queryExecutionIds = append(queryExecutionIds, output.QueryExecutionIds...)
+	}
+
+	queryExecutionIdChunks := chunks(queryExecutionIds, 50)
+	g, getQueryExecutionCtx := errgroup.WithContext(ctx)
+
+	ttlTime := time.Now().Add(-ttl)
+	var mu sync.Mutex
+
+	latestCompletionDateTime := time.Now()
+	latestQueryExecutionId := ""
+
+	for _, value := range queryExecutionIdChunks {
+		value := value
+		g.Go(func() error {
+			result, err := r.svc.BatchGetQueryExecution(getQueryExecutionCtx, &athena.BatchGetQueryExecutionInput{
+				QueryExecutionIds: value,
+			})
+			if err != nil {
+				return err
+			}
+
+			for _, v := range result.QueryExecutions {
+				// Different query
+				if *v.Query != queryString {
+					continue
+				}
+
+				// Query didn't completed
+				if v.Status.CompletionDateTime == nil {
+					continue
+				}
+
+				// Query already expired
+				if v.Status.CompletionDateTime.Before(ttlTime) {
+					continue
+				}
+
+				mu.Lock()
+
+				// Store the latest query result
+				if latestQueryExecutionId == "" {
+					latestQueryExecutionId = *v.QueryExecutionId
+					latestCompletionDateTime = *v.Status.CompletionDateTime
+				} else {
+					if v.Status.CompletionDateTime.After(latestCompletionDateTime) {
+						latestQueryExecutionId = *v.QueryExecutionId
+						latestCompletionDateTime = *v.Status.CompletionDateTime
+					}
+				}
+
+				mu.Unlock()
+			}
+
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	if latestQueryExecutionId != "" {
+		return r.fetchQueryResult(ctx, latestQueryExecutionId)
+	}
+
+	return r.queryAthena(ctx, queryString)
 }
 
 func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
@@ -313,9 +423,13 @@ func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.R
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	return s.fetchQueryResult(ctx, *output.QueryExecutionId)
+}
+
+func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId string) ([]types.Row, error) {
 	// Get query results
-	paginator := athena.NewGetQueryResultsPaginator(s.svc, &athena.GetQueryResultsInput{
-		QueryExecutionId: output.QueryExecutionId,
+	paginator := athena.NewGetQueryResultsPaginator(r.svc, &athena.GetQueryResultsInput{
+		QueryExecutionId: &queryExecutionId,
 	})
 	rows := []types.Row{}
 	for paginator.HasMorePages() {
@@ -333,4 +447,23 @@ func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.R
 	}
 
 	return rows, nil
+}
+
+// From https://stackoverflow.com/a/67011816/2148473
+func chunks(xs []string, chunkSize int) [][]string {
+	if len(xs) == 0 {
+		return nil
+	}
+	divided := make([][]string, (len(xs)+chunkSize-1)/chunkSize)
+	prev := 0
+	i := 0
+	till := len(xs) - chunkSize
+	for prev < till {
+		next := prev + chunkSize
+		divided[i] = xs[prev:next]
+		prev = next
+		i++
+	}
+	divided[i] = xs[prev:]
+	return divided
 }

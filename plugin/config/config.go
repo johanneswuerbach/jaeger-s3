@@ -8,11 +8,13 @@ type S3 struct {
 }
 
 type Athena struct {
-	DatabaseName   string
-	TableName      string
-	WorkGroup      string
-	OutputLocation string
-	MaxSpanAge     string
+	DatabaseName         string
+	TableName            string
+	WorkGroup            string
+	OutputLocation       string
+	MaxSpanAge           string
+	DependenciesQueryTTL string
+	ServicesQueryTTL     string
 }
 
 type Configuration struct {
