@@ -335,6 +335,7 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl 
 
 	latestCompletionDateTime := time.Now()
 	latestQueryExecutionId := ""
+	trimmedQueryString := strings.TrimSpace(queryString)
 
 	for _, value := range queryExecutionIdChunks {
 		value := value
@@ -348,7 +349,7 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl 
 
 			for _, v := range result.QueryExecutions {
 				// Different query
-				if *v.Query != queryString {
+				if *v.Query != trimmedQueryString {
 					continue
 				}
 
