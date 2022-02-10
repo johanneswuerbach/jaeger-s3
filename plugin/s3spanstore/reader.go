@@ -270,7 +270,6 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 	startTs := endTs.Add(-lookback)
 
 	conditions := []string{
-		fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, startTs.Format(ATHENA_TIMEFORMAT), endTs.Format(ATHENA_TIMEFORMAT)),
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, startTs.Format(PARTION_FORMAT), endTs.Format(PARTION_FORMAT)),
 	}
 
