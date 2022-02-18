@@ -117,7 +117,7 @@ func (s *Reader) GetServices(ctx context.Context) ([]string, error) {
 	}
 
 	serviceNames := make([]string, 0, len(serviceNameMap))
-	for serviceName, _ := range serviceNameMap {
+	for serviceName := range serviceNameMap {
 		serviceNames = append(serviceNames, serviceName)
 	}
 
