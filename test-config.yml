@@ -1,0 +1,13 @@
+s3:
+  bucketName: jaeger-s3-test
+  prefix: spans/
+  bufferDuration: 1s
+  emptyBucket: true
+athena:
+  databaseName: default
+  tableName: jaeger
+  outputLocation: s3://jaeger-s3-test-results/
+  workGroup: jaeger
+  maxSpanAge: 336h
+  dependenciesQueryTtl: 6h
+  servicesQueryTtl: 10s
