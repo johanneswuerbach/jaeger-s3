@@ -19,7 +19,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Reader, error) {
+// mockgen -destination=./plugin/s3spanstore/mocks/mock_athena.go -package=mocks github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore AthenaAPI
+
+type AthenaAPI interface {
+	BatchGetQueryExecution(ctx context.Context, params *athena.BatchGetQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.BatchGetQueryExecutionOutput, error)
+	GetQueryExecution(ctx context.Context, params *athena.GetQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.GetQueryExecutionOutput, error)
+	GetQueryResults(ctx context.Context, params *athena.GetQueryResultsInput, optFns ...func(*athena.Options)) (*athena.GetQueryResultsOutput, error)
+	ListQueryExecutions(ctx context.Context, params *athena.ListQueryExecutionsInput, optFns ...func(*athena.Options)) (*athena.ListQueryExecutionsOutput, error)
+	StartQueryExecution(ctx context.Context, params *athena.StartQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StartQueryExecutionOutput, error)
+	StopQueryExecution(ctx context.Context, params *athena.StopQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StopQueryExecutionOutput, error)
+}
+
+func NewReader(logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, error) {
 	maxSpanAge, err := time.ParseDuration(cfg.MaxSpanAge)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
@@ -47,7 +58,7 @@ func NewReader(logger hclog.Logger, svc *athena.Client, cfg config.Athena) (*Rea
 
 type Reader struct {
 	logger               hclog.Logger
-	svc                  *athena.Client
+	svc                  AthenaAPI
 	cfg                  config.Athena
 	maxSpanAge           time.Duration
 	dependenciesQueryTTL time.Duration
