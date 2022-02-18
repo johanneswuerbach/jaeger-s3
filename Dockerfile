@@ -17,7 +17,7 @@ RUN git clone --depth=1 --single-branch --branch=main https://github.com/jaegert
 WORKDIR /jaeger
 COPY --from=build /src/s3-plugin /go/bin
 
-FROM jaegertracing/all-in-one:1.30.0 AS jaeger-test
+FROM jaegertracing/all-in-one:1.31.0 AS jaeger-test
 COPY --from=build /src/s3-plugin /go/bin
 
 FROM alpine:3.15.0
