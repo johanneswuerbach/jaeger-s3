@@ -2,6 +2,7 @@ package s3spanstore
 
 import (
 	"context"
+	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +16,8 @@ import (
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/xitongsys/parquet-go-source/local"
+	"github.com/xitongsys/parquet-go/reader"
 )
 
 func NewTestWriter(ctx context.Context, assert *assert.Assertions, mockSvc *mocks.MockS3API) *Writer {
@@ -70,6 +73,58 @@ func NewTestSpan(assert *assert.Assertions) *model.Span {
 	return &span
 }
 
+func NewTestSpanWithTagsAndReferences(assert *assert.Assertions) *model.Span {
+	var span model.Span
+	assert.NoError(jsonpb.Unmarshal(strings.NewReader(`{
+		"traceId": "AAAAAAAAAAAAAAAAAAAAEg==",
+		"spanId": "AAAAAAAAAAQ=",
+		"operationName": "query12-operation",
+		"references": [
+			{
+				"refType": "CHILD_OF",
+				"traceId": "AAAAAAAAAAAAAAAAAAAA/w==",
+				"spanId": "AAAAAAAAAP8="
+			}
+		],
+		"tags": [
+			{
+				"key": "sameplacetag1",
+				"vType": "STRING",
+				"vStr": "sameplacevalue"
+			},
+			{
+				"key": "sameplacetag2",
+				"vType": "INT64",
+				"vInt64": 123
+			},
+			{
+				"key": "sameplacetag4",
+				"vType": "BOOL",
+				"vBool": true
+			},
+			{
+				"key": "sameplacetag3",
+				"vType": "FLOAT64",
+				"vFloat64": 72.5
+			},
+			{
+				"key": "blob",
+				"vType": "BINARY",
+				"vBinary": "AAAwOQ=="
+			}
+		],
+		"startTime": "2017-01-26T16:46:31.639875Z",
+		"duration": "2000ns",
+		"process": {
+			"serviceName": "query12-service",
+			"tags": []
+		},
+		"logs": []
+	}`), &span))
+
+	return &span
+}
+
 func TestS3ParquetKey(t *testing.T) {
 	assert := assert.New(t)
 
@@ -87,11 +142,22 @@ func TestWriteSpan(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockSvc := mocks.NewMockS3API(ctrl)
-	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&s3.PutObjectOutput{}, nil)
 
 	assert := assert.New(t)
 	ctx := context.TODO()
+
+	file, err := ioutil.TempFile("", "write-span")
+	assert.NoError(err)
+	defer os.Remove(file.Name())
+
+	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+			dat, err := ioutil.ReadAll(input.Body)
+			assert.NoError(err)
+			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
+
+			return &s3.PutObjectOutput{}, nil
+		})
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 
@@ -101,23 +167,33 @@ func TestWriteSpan(t *testing.T) {
 
 	assert.NoError(writer.Close())
 
-	// assert.Equal(stripFormatting(`{
-	// 	"traceid":"0000000000000011",
-	// 	"spanid":"0000000000000003",
-	// 	"operationname":"example-operation-1",
-	// 	"spankind":"",
-	// 	"starttime":1485449191639,
-	// 	"duration":100000,
-	// 	"tags":{},
-	// 	"servicename":"example-service-1",
-	// 	"spanpayload":"/wYAAHNOYVBwWQBZAAB5D7oLeggKEAA2AQAIERIIDRGwAxoTZXhhbXBsZS1vcGVyYXRpb24tMTIMCOfPqMQFELjvjrECOgQQoI0GSg4KMhYAAEo6EAAMUhMKERFLIHNlcnZpY2UtMQ==",
-	// 	"references":[]
-	// }`), string(writtenRecord.Data))
-}
+	localFileReader, err := local.NewLocalFileReader(file.Name())
+	assert.NoError(err)
+	pr, err := reader.NewParquetReader(localFileReader, new(SpanRecord), 1)
+	assert.NoError(err)
 
-// func stripFormatting(json string) string {
-// 	return strings.ReplaceAll(strings.ReplaceAll(json, "\n", ""), "\t", "")
-// }
+	num := int(pr.GetNumRows())
+	assert.Equal(1, num)
+
+	records := make([]SpanRecord, 1)
+	assert.NoError(pr.Read(&records))
+
+	record := records[0]
+
+	assert.Equal("0000000000000011", record.TraceID)
+	assert.Equal("0000000000000003", record.SpanID)
+	assert.Equal("example-operation-1", record.OperationName)
+	assert.Equal("", record.SpanKind)
+	assert.Equal(int64(1485449191639), record.StartTime)
+	assert.Equal(int64(100000), record.Duration)
+	assert.Equal(map[string]string{}, record.Tags)
+	assert.Equal("example-service-1", record.ServiceName)
+	assert.Equal("/wYAAHNOYVBwWQBZAAB5D7oLeggKEAA2AQAIERIIDRGwAxoTZXhhbXBsZS1vcGVyYXRpb24tMTIMCOfPqMQFELjvjrECOgQQoI0GSg4KMhYAAEo6EAAMUhMKERFLIHNlcnZpY2UtMQ==", record.SpanPayload)
+	assert.Equal([]SpanRecordReferences{}, record.References)
+
+	pr.ReadStop()
+	assert.NoError(localFileReader.Close())
+}
 
 func TestWriteSpanAndRotate(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -143,6 +219,66 @@ func TestWriteSpanAndRotate(t *testing.T) {
 	assert.NoError(writer.WriteSpan(ctx, span))
 
 	assert.NoError(writer.Close())
+}
+
+func TestWriteSpanWithTagsAndReferences(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := mocks.NewMockS3API(ctrl)
+
+	assert := assert.New(t)
+	ctx := context.TODO()
+
+	file, err := ioutil.TempFile("", "write-span")
+	assert.NoError(err)
+	defer os.Remove(file.Name())
+
+	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+			dat, err := ioutil.ReadAll(input.Body)
+			assert.NoError(err)
+			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
+
+			return &s3.PutObjectOutput{}, nil
+		})
+
+	writer := NewTestWriter(ctx, assert, mockSvc)
+
+	span := NewTestSpanWithTagsAndReferences(assert)
+
+	assert.NoError(writer.WriteSpan(ctx, span))
+	assert.NoError(writer.Close())
+
+	localFileReader, err := local.NewLocalFileReader(file.Name())
+	assert.NoError(err)
+	pr, err := reader.NewParquetReader(localFileReader, new(SpanRecord), 1)
+	assert.NoError(err)
+
+	num := int(pr.GetNumRows())
+	assert.Equal(1, num)
+
+	records := make([]SpanRecord, 1)
+	assert.NoError(pr.Read(&records))
+
+	record := records[0]
+
+	assert.Equal("0000000000000012", record.TraceID)
+	assert.Equal("0000000000000004", record.SpanID)
+	assert.Equal("query12-operation", record.OperationName)
+	assert.Equal("", record.SpanKind)
+	assert.Equal(int64(1485449191639), record.StartTime)
+	assert.Equal(int64(2000), record.Duration)
+	assert.Equal(map[string]string{
+		"blob": "00003039", "sameplacetag1": "sameplacevalue", "sameplacetag2": "123", "sameplacetag3": "72.5", "sameplacetag4": "true",
+	}, record.Tags)
+	assert.Equal("query12-service", record.ServiceName)
+	assert.Equal([]SpanRecordReferences{
+		{TraceID: "00000000000000ff", SpanID: "00000000000000ff", RefType: 0},
+	}, record.References)
+
+	pr.ReadStop()
+	assert.NoError(localFileReader.Close())
 }
 
 func BenchmarkWriteSpan(b *testing.B) {

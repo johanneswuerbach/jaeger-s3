@@ -169,7 +169,11 @@ func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, err
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, r.DefaultMinTime().Format(PARTION_FORMAT), r.DefaultMaxTime().Format(PARTION_FORMAT)),
 	}
 
-	result, err := r.queryAthenaCached(ctx, fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")), r.servicesQueryTTL)
+	result, err := r.queryAthenaCached(
+		ctx,
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")),
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE`, r.cfg.TableName),
+		r.servicesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -301,7 +305,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
 			WHERE %s
 			GROUP BY 1, 2
-	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), r.dependenciesQueryTTL)
+	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), "WITH spans_with_reference", r.dependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -323,7 +327,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 	return dependencyLinks, nil
 }
 
-func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl time.Duration) ([]types.Row, error) {
+func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, lookupString string, ttl time.Duration) ([]types.Row, error) {
 	paginator := athena.NewListQueryExecutionsPaginator(r.svc, &athena.ListQueryExecutionsInput{
 		WorkGroup: &r.cfg.WorkGroup,
 	})
@@ -345,7 +349,6 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl 
 
 	latestCompletionDateTime := time.Now()
 	latestQueryExecutionId := ""
-	trimmedQueryString := strings.TrimSpace(queryString)
 
 	for _, value := range queryExecutionIdChunks {
 		value := value
@@ -359,7 +362,7 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl 
 
 			for _, v := range result.QueryExecutions {
 				// Different query
-				if *v.Query != trimmedQueryString {
+				if !strings.Contains(*v.Query, lookupString) {
 					continue
 				}
 
