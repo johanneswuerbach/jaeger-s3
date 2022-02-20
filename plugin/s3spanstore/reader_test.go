@@ -134,12 +134,16 @@ func TestGetServicesCached(t *testing.T) {
 				QueryExecutions: []types.QueryExecution{
 					{
 						Query:            aws.String("asdas"),
-						QueryExecutionId: aws.String("different"),
+						QueryExecutionId: aws.String(invalidQueryID),
+						Status: &types.QueryExecutionStatus{
+							SubmissionDateTime: aws.Time(time.Now().UTC()),
+						},
 					},
 					{
 						Query:            aws.String(`SELECT service_name, operation_name, span_kind FROM "jaeger" WHERE`),
-						QueryExecutionId: aws.String("get-services"),
+						QueryExecutionId: aws.String(validQueryID),
 						Status: &types.QueryExecutionStatus{
+							SubmissionDateTime: aws.Time(time.Now().UTC()),
 							CompletionDateTime: aws.Time(time.Now().UTC()),
 						},
 					},
