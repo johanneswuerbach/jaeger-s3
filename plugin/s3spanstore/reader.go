@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
@@ -16,7 +15,6 @@ import (
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
 	"github.com/opentracing/opentracing-go"
-	"golang.org/x/sync/errgroup"
 )
 
 // mockgen -destination=./plugin/s3spanstore/mocks/mock_athena.go -package=mocks github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore AthenaAPI
@@ -53,6 +51,7 @@ func NewReader(logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, 
 		maxSpanAge:           maxSpanAge,
 		dependenciesQueryTTL: dependenciesQueryTTL,
 		servicesQueryTTL:     servicesQueryTTL,
+		athenaQueryCache:     NewAthenaQueryCache(logger, svc, cfg.WorkGroup),
 	}, nil
 }
 
@@ -63,6 +62,7 @@ type Reader struct {
 	maxSpanAge           time.Duration
 	dependenciesQueryTTL time.Duration
 	servicesQueryTTL     time.Duration
+	athenaQueryCache     *AthenaQueryCache
 }
 
 const (
@@ -169,7 +169,11 @@ func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, err
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, r.DefaultMinTime().Format(PARTION_FORMAT), r.DefaultMaxTime().Format(PARTION_FORMAT)),
 	}
 
-	result, err := r.queryAthenaCached(ctx, fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")), r.servicesQueryTTL)
+	result, err := r.queryAthenaCached(
+		ctx,
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")),
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE`, r.cfg.TableName),
+		r.servicesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -301,7 +305,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
 			WHERE %s
 			GROUP BY 1, 2
-	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), r.dependenciesQueryTTL)
+	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), "WITH spans_with_reference", r.dependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -323,124 +327,71 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 	return dependencyLinks, nil
 }
 
-func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, ttl time.Duration) ([]types.Row, error) {
-	paginator := athena.NewListQueryExecutionsPaginator(r.svc, &athena.ListQueryExecutionsInput{
-		WorkGroup: &r.cfg.WorkGroup,
-	})
-	queryExecutionIds := []string{}
-	for paginator.HasMorePages() {
-		output, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get athena query result: %w", err)
-		}
-
-		queryExecutionIds = append(queryExecutionIds, output.QueryExecutionIds...)
+func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, lookupString string, ttl time.Duration) ([]types.Row, error) {
+	queryExecution, err := r.athenaQueryCache.Lookup(ctx, lookupString, ttl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup cached athena query: %w", err)
 	}
 
-	queryExecutionIdChunks := chunks(queryExecutionIds, 50)
-	g, getQueryExecutionCtx := errgroup.WithContext(ctx)
-
-	ttlTime := time.Now().Add(-ttl)
-	var mu sync.Mutex
-
-	latestCompletionDateTime := time.Now()
-	latestQueryExecutionId := ""
-	trimmedQueryString := strings.TrimSpace(queryString)
-
-	for _, value := range queryExecutionIdChunks {
-		value := value
-		g.Go(func() error {
-			result, err := r.svc.BatchGetQueryExecution(getQueryExecutionCtx, &athena.BatchGetQueryExecutionInput{
-				QueryExecutionIds: value,
-			})
-			if err != nil {
-				return err
-			}
-
-			for _, v := range result.QueryExecutions {
-				// Different query
-				if *v.Query != trimmedQueryString {
-					continue
-				}
-
-				// Query didn't completed
-				if v.Status.CompletionDateTime == nil {
-					continue
-				}
-
-				// Query already expired
-				if v.Status.CompletionDateTime.Before(ttlTime) {
-					continue
-				}
-
-				mu.Lock()
-
-				// Store the latest query result
-				if latestQueryExecutionId == "" {
-					latestQueryExecutionId = *v.QueryExecutionId
-					latestCompletionDateTime = *v.Status.CompletionDateTime
-				} else {
-					if v.Status.CompletionDateTime.After(latestCompletionDateTime) {
-						latestQueryExecutionId = *v.QueryExecutionId
-						latestCompletionDateTime = *v.Status.CompletionDateTime
-					}
-				}
-
-				mu.Unlock()
-			}
-
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
-	if latestQueryExecutionId != "" {
-		return r.fetchQueryResult(ctx, latestQueryExecutionId)
+	if queryExecution != nil {
+		return r.waitAndFetchQueryResult(ctx, queryExecution)
 	}
 
 	return r.queryAthena(ctx, queryString)
 }
 
-func (s *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
-	output, err := s.svc.StartQueryExecution(ctx, &athena.StartQueryExecutionInput{
+func (r *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
+	output, err := r.svc.StartQueryExecution(ctx, &athena.StartQueryExecutionInput{
 		QueryString: &queryString,
 		QueryExecutionContext: &types.QueryExecutionContext{
-			Database: &s.cfg.DatabaseName,
+			Database: &r.cfg.DatabaseName,
 		},
 		ResultConfiguration: &types.ResultConfiguration{
-			OutputLocation: &s.cfg.OutputLocation,
+			OutputLocation: &r.cfg.OutputLocation,
 		},
-		WorkGroup: &s.cfg.WorkGroup,
+		WorkGroup: &r.cfg.WorkGroup,
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to start athena query: %w", err)
 	}
 
+	status, err := r.svc.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
+		QueryExecutionId: output.QueryExecutionId,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get athena query execution: %w", err)
+	}
+
+	return r.waitAndFetchQueryResult(ctx, status.QueryExecution)
+}
+
+func (r *Reader) waitAndFetchQueryResult(ctx context.Context, queryExecution *types.QueryExecution) ([]types.Row, error) {
 	// Poll until the query completed
 	for {
-		status, err := s.svc.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
-			QueryExecutionId: output.QueryExecutionId,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get athena query execution: %w", err)
-		}
-		if status.QueryExecution.Status.CompletionDateTime != nil {
+		if queryExecution.Status.CompletionDateTime != nil {
 			break
 		}
 
 		time.Sleep(100 * time.Millisecond)
+
+		status, err := r.svc.GetQueryExecution(ctx, &athena.GetQueryExecutionInput{
+			QueryExecutionId: queryExecution.QueryExecutionId,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get athena query execution: %w", err)
+		}
+
+		queryExecution = status.QueryExecution
 	}
 
-	return s.fetchQueryResult(ctx, *output.QueryExecutionId)
+	return r.fetchQueryResult(ctx, queryExecution.QueryExecutionId)
 }
 
-func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId string) ([]types.Row, error) {
+func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId *string) ([]types.Row, error) {
 	// Get query results
 	paginator := athena.NewGetQueryResultsPaginator(r.svc, &athena.GetQueryResultsInput{
-		QueryExecutionId: &queryExecutionId,
+		QueryExecutionId: queryExecutionId,
 	})
 	rows := []types.Row{}
 	for paginator.HasMorePages() {
@@ -458,23 +409,4 @@ func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId string) 
 	}
 
 	return rows, nil
-}
-
-// From https://stackoverflow.com/a/67011816/2148473
-func chunks(xs []string, chunkSize int) [][]string {
-	if len(xs) == 0 {
-		return nil
-	}
-	divided := make([][]string, (len(xs)+chunkSize-1)/chunkSize)
-	prev := 0
-	i := 0
-	till := len(xs) - chunkSize
-	for prev < till {
-		next := prev + chunkSize
-		divided[i] = xs[prev:next]
-		prev = next
-		i++
-	}
-	divided[i] = xs[prev:]
-	return divided
 }
