@@ -313,7 +313,7 @@ spec:
   storage:
     type: grpc-plugin
     grpcPlugin:
-      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.1.5
+      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.3.0
     options:
       grpc-storage-plugin:
         binary: /plugin/jaeger-s3
