@@ -214,7 +214,7 @@ func TestWriteSpanAndRotate(t *testing.T) {
 
 	assert.NoError(writer.WriteSpan(ctx, span))
 
-	assert.NoError(writer.rotateParquetWriters())
+	assert.NoError(writer.spanParquetWriter.rotateParquetWriters())
 
 	assert.NoError(writer.WriteSpan(ctx, span))
 
