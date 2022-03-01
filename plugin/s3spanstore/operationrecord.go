@@ -1,6 +1,8 @@
 package s3spanstore
 
 import (
+	"fmt"
+
 	"github.com/jaegertracing/jaeger/model"
 )
 
@@ -19,4 +21,8 @@ func NewOperationRecordFromSpan(span *model.Span) (*OperationRecord, error) {
 		SpanKind:      kind,
 		ServiceName:   span.Process.ServiceName,
 	}, nil
+}
+
+func (w *OperationRecord) DedupeKey() string {
+	return fmt.Sprintf("%s/%s/%s", w.OperationName, w.SpanKind, w.ServiceName)
 }

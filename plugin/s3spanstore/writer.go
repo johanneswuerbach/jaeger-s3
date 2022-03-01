@@ -32,7 +32,7 @@ type Writer struct {
 	logger hclog.Logger
 
 	spanParquetWriter       IParquetWriter
-	operationsParquetWriter IParquetWriter
+	operationsParquetWriter *DedupeParquetWriter
 }
 
 func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {

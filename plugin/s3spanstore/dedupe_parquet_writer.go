@@ -16,6 +16,10 @@ type DedupeParquetWriter struct {
 	parquetWriter  IParquetWriter
 }
 
+type DeduplicatableRow interface {
+	DedupeKey() string
+}
+
 func NewDedupeParquetWriter(logger hclog.Logger, dedupeDuration time.Duration, dedupeCacheSize int, parquetWriter IParquetWriter) (*DedupeParquetWriter, error) {
 	dedupeCache, err := lru.New(dedupeCacheSize)
 	if err != nil {
@@ -32,12 +36,12 @@ func NewDedupeParquetWriter(logger hclog.Logger, dedupeDuration time.Duration, d
 	return w, nil
 }
 
-func (w *DedupeParquetWriter) Write(ctx context.Context, rowTime time.Time, row interface{}) error {
-	if nextWriteTime, ok := w.dedupeCache.Get(row); !ok || rowTime.After(nextWriteTime.(time.Time)) {
+func (w *DedupeParquetWriter) Write(ctx context.Context, rowTime time.Time, row DeduplicatableRow) error {
+	if nextWriteTime, ok := w.dedupeCache.Get(row.DedupeKey()); !ok || rowTime.After(nextWriteTime.(time.Time)) {
 		if err := w.parquetWriter.Write(ctx, rowTime, row); err != nil {
 			return fmt.Errorf("failed to write row: %w", err)
 		}
-		w.dedupeCache.Add(row, rowTime.Add(w.dedupeDuration))
+		w.dedupeCache.Add(row.DedupeKey(), rowTime.Add(w.dedupeDuration))
 	}
 
 	return nil
