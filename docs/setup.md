@@ -341,7 +341,8 @@ data:
       outputLocation: s3://my-jaeger-s3-bucket-athena-results/
       workGroup: jaeger
       maxSpanAge: 336h
-      dependenciesQueryTtl: 6h
+      dependenciesQueryTtl: 24h
+      dependenciesPrefetch: true
       servicesQueryTtl: 60s
 
 ---
@@ -389,7 +390,7 @@ spec:
   storage:
     type: grpc-plugin
     grpcPlugin:
-      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.4.2
+      image: ghcr.io/johanneswuerbach/jaeger-s3:v0.4.3
     options:
       grpc-storage-plugin:
         binary: /plugin/jaeger-s3
