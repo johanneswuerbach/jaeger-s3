@@ -61,7 +61,7 @@ func main() {
 	_, err = glueSvc.DeleteTable(ctx, &glue.DeleteTableInput{
 		DatabaseName: aws.String("default"),
 
-		Name: aws.String("jaeger"),
+		Name: aws.String("jaeger_spans"),
 	})
 	if err != nil {
 		var bne *glueTypes.EntityNotFoundException
@@ -74,7 +74,7 @@ func main() {
 		DatabaseName: aws.String("default"),
 
 		TableInput: &glueTypes.TableInput{
-			Name: aws.String("jaeger"),
+			Name: aws.String("jaeger_spans"),
 
 			Parameters: map[string]string{
 				"classification":                    "parquet",
@@ -152,7 +152,80 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("unable to create s3 bucket, %v", err)
+		log.Fatalf("unable to create glue table, %v", err)
+	}
+
+	_, err = glueSvc.DeleteTable(ctx, &glue.DeleteTableInput{
+		DatabaseName: aws.String("default"),
+
+		Name: aws.String("jaeger_operations"),
+	})
+	if err != nil {
+		var bne *glueTypes.EntityNotFoundException
+		if !errors.As(err, &bne) {
+			log.Fatalf("unable to delete glue table, %v", err)
+		}
+	}
+
+	_, err = glueSvc.CreateTable(ctx, &glue.CreateTableInput{
+		DatabaseName: aws.String("default"),
+
+		TableInput: &glueTypes.TableInput{
+			Name: aws.String("jaeger_operations"),
+
+			Parameters: map[string]string{
+				"classification":                    "parquet",
+				"projection.enabled":                "true",
+				"projection.datehour.type":          "date",
+				"projection.datehour.format":        "yyyy/MM/dd/HH",
+				"projection.datehour.range":         "2022/01/01/00,NOW",
+				"projection.datehour.interval":      "1",
+				"projection.datehour.interval.unit": "HOURS",
+				"storage.location.template":         fmt.Sprintf("s3://%s/operations/${datehour}/", bucketName),
+			},
+
+			PartitionKeys: []glueTypes.Column{
+				{
+					Name: aws.String("datehour"),
+					Type: aws.String("string"),
+				},
+			},
+
+			StorageDescriptor: &glueTypes.StorageDescriptor{
+				Location:     aws.String(fmt.Sprintf("s3://%s/operations/", bucketName)),
+				InputFormat:  aws.String("org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"),
+				OutputFormat: aws.String("org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"),
+
+				SerdeInfo: &glueTypes.SerDeInfo{
+					SerializationLibrary: aws.String("org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"),
+					Parameters: map[string]string{
+						"serialization.format": "1",
+					},
+				},
+
+				Columns: []glueTypes.Column{
+					{
+						Name: aws.String("operation_name"),
+						Type: aws.String("string"),
+					},
+					{
+						Name: aws.String("span_kind"),
+						Type: aws.String("string"),
+					},
+					{
+						Name: aws.String("service_name"),
+						Type: aws.String("string"),
+					},
+					{
+						Name: aws.String("span_payload"),
+						Type: aws.String("string"),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		log.Fatalf("unable to create glue table, %v", err)
 	}
 
 	_, err = athenaSvc.CreateWorkGroup(ctx, &athena.CreateWorkGroupInput{

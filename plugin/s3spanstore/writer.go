@@ -30,7 +30,7 @@ type S3API interface {
 type Writer struct {
 	logger hclog.Logger
 
-	spanParquetWriter *ParquetWriter
+	parquetWriters []IParquetWriter
 }
 
 func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
@@ -70,6 +70,20 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		bufferDuration = duration
 	}
 
+	operationsDedupeDuration := time.Hour * 1
+	if s3Config.OperationsDedupeDuration != "" {
+		duration, err := time.ParseDuration(s3Config.OperationsDedupeDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
+		}
+		operationsDedupeDuration = duration
+	}
+
+	operationsDedupeCacheSize := 10000
+	if s3Config.OperationsDedupeCacheSize > 0 {
+		operationsDedupeCacheSize = s3Config.OperationsDedupeCacheSize
+	}
+
 	ctx := context.Background()
 
 	if s3Config.EmptyBucket {
@@ -78,14 +92,24 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		}
 	}
 
-	spanParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.Prefix)
+	spanParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.SpansPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
+	}
+
+	operationsParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.OperationsPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
+	}
+
+	operationsDedupeParquetWriter, err := NewDedupeParquetWriter(logger, operationsDedupeDuration, operationsDedupeCacheSize, operationsParquetWriter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
 	w := &Writer{
-		logger:            logger,
-		spanParquetWriter: spanParquetWriter,
+		logger:         logger,
+		parquetWriters: []IParquetWriter{operationsDedupeParquetWriter, spanParquetWriter},
 	}
 
 	return w, nil
@@ -99,12 +123,21 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 		return fmt.Errorf("failed to create span record: %w", err)
 	}
 
-	if err := w.spanParquetWriter.Write(ctx, span.StartTime, spanRecord); err != nil {
-		return fmt.Errorf("failed to write span item: %w", err)
+	for _, parquetWriter := range w.parquetWriters {
+		if err := parquetWriter.Write(ctx, span.StartTime, spanRecord); err != nil {
+			return fmt.Errorf("failed to write span item: %w", err)
+		}
 	}
+
 	return nil
 }
 
 func (w *Writer) Close() error {
-	return w.spanParquetWriter.Close()
+	for _, parquetWriter := range w.parquetWriters {
+		if err := parquetWriter.Close(); err != nil {
+			return fmt.Errorf("failed to close parquet writer: %w", err)
+		}
+	}
+
+	return nil
 }

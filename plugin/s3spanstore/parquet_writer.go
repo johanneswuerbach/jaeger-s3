@@ -54,6 +54,11 @@ type ParquetWriter struct {
 	ctx               context.Context
 }
 
+type IParquetWriter interface {
+	Write(ctx context.Context, time time.Time, row interface{}) error
+	Close() error
+}
+
 func NewParquetWriter(ctx context.Context, logger hclog.Logger, svc S3API, bufferDuration time.Duration, bucketName string, prefix string) (*ParquetWriter, error) {
 	w := &ParquetWriter{
 		svc:               svc,

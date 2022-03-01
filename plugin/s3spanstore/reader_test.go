@@ -33,7 +33,8 @@ func NewTestReader(ctx context.Context, assert *assert.Assertions, mockSvc *mock
 
 	reader, err := NewReader(logger, mockSvc, config.Athena{
 		DatabaseName:         "default",
-		TableName:            "jaeger",
+		SpansTableName:       "jaeger_spans",
+		OperationsTableName:  "jaeger_operations",
 		OutputLocation:       "s3://jaeger-s3-test-results/",
 		WorkGroup:            "jaeger",
 		MaxSpanAge:           "336h",
@@ -140,7 +141,7 @@ func TestGetServicesCached(t *testing.T) {
 						},
 					},
 					{
-						Query:            aws.String(`SELECT service_name, operation_name, span_kind FROM "jaeger" WHERE`),
+						Query:            aws.String(`SELECT service_name, operation_name, span_kind FROM "jaeger_operations" WHERE`),
 						QueryExecutionId: aws.String(validQueryID),
 						Status: &types.QueryExecutionStatus{
 							SubmissionDateTime: aws.Time(time.Now().UTC()),
