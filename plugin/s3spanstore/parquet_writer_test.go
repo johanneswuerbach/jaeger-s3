@@ -27,7 +27,7 @@ func NewTestParquetWriter(ctx context.Context, assert *assert.Assertions, mockSv
 		JSONFormat: true,
 	})
 
-	writer, err := NewParquetWriter(ctx, logger, mockSvc, time.Millisecond*200, "jaeger-spans", "/spans/")
+	writer, err := NewParquetWriter(ctx, logger, mockSvc, time.Millisecond*200, "jaeger-spans", "/spans/", new(SpanRecord))
 
 	assert.NoError(err)
 

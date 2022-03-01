@@ -48,6 +48,7 @@ type ParquetWriter struct {
 	prefix     string
 	ticker     *time.Ticker
 	done       chan bool
+	rowType    interface{}
 
 	parquetWriterRefs map[string]*ParquetRef
 	bufferMutex       sync.Mutex
@@ -59,7 +60,7 @@ type IParquetWriter interface {
 	Close() error
 }
 
-func NewParquetWriter(ctx context.Context, logger hclog.Logger, svc S3API, bufferDuration time.Duration, bucketName string, prefix string) (*ParquetWriter, error) {
+func NewParquetWriter(ctx context.Context, logger hclog.Logger, svc S3API, bufferDuration time.Duration, bucketName string, prefix string, rowType interface{}) (*ParquetWriter, error) {
 	w := &ParquetWriter{
 		svc:               svc,
 		bucketName:        bucketName,
@@ -69,6 +70,7 @@ func NewParquetWriter(ctx context.Context, logger hclog.Logger, svc S3API, buffe
 		done:              make(chan bool),
 		parquetWriterRefs: map[string]*ParquetRef{},
 		ctx:               ctx,
+		rowType:           rowType,
 	}
 
 	go func() {
@@ -97,7 +99,7 @@ func (w *ParquetWriter) getParquetWriter(datehour string) (*writer.ParquetWriter
 		return nil, fmt.Errorf("failed to create parquet s3 client: %w", err)
 	}
 
-	parquetWriter, err := writer.NewParquetWriter(writeFile, new(SpanRecord), PARQUET_CONCURRENCY)
+	parquetWriter, err := writer.NewParquetWriter(writeFile, w.rowType, PARQUET_CONCURRENCY)
 	if err != nil {
 		writeFile.Close()
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
