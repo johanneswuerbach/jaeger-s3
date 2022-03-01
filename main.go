@@ -72,7 +72,7 @@ func main() {
 
 	logger.Debug("plugin configured")
 
-	s3Plugin, err := plugin.NewS3Plugin(logger, s3Svc, configuration.S3, athenaSvc, configuration.Athena)
+	s3Plugin, err := plugin.NewS3Plugin(ctx, logger, s3Svc, configuration.S3, athenaSvc, configuration.Athena)
 	if err != nil {
 		log.Fatalf("unable to create plugin, %v", err)
 	}
