@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/athena"
@@ -12,13 +13,13 @@ import (
 	"github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore"
 )
 
-func NewS3Plugin(logger hclog.Logger, s3Svc *s3.Client, s3Config config.S3, athenaSvc *athena.Client, athenaConfig config.Athena) (*S3Plugin, error) {
-	spanWriter, err := s3spanstore.NewWriter(logger, s3Svc, s3Config)
+func NewS3Plugin(ctx context.Context, logger hclog.Logger, s3Svc *s3.Client, s3Config config.S3, athenaSvc *athena.Client, athenaConfig config.Athena) (*S3Plugin, error) {
+	spanWriter, err := s3spanstore.NewWriter(ctx, logger, s3Svc, s3Config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create span writer, %v", err)
 	}
 
-	spanReader, err := s3spanstore.NewReader(logger, athenaSvc, athenaConfig)
+	spanReader, err := s3spanstore.NewReader(ctx, logger, athenaSvc, athenaConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create span reader, %v", err)
 	}

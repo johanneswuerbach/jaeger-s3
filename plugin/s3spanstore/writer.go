@@ -60,7 +60,7 @@ func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
 	return nil
 }
 
-func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
+func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
 	rand.Seed(time.Now().UnixNano())
 
 	bufferDuration := time.Second * 60
@@ -85,8 +85,6 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 	if s3Config.OperationsDedupeCacheSize > 0 {
 		operationsDedupeCacheSize = s3Config.OperationsDedupeCacheSize
 	}
-
-	ctx := context.Background()
 
 	if s3Config.EmptyBucket {
 		if err := EmptyBucket(ctx, svc, s3Config.BucketName); err != nil {

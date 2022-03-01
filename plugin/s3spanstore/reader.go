@@ -28,7 +28,7 @@ type AthenaAPI interface {
 	StopQueryExecution(ctx context.Context, params *athena.StopQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StopQueryExecutionOutput, error)
 }
 
-func NewReader(logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, error) {
+func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, error) {
 	maxSpanAge, err := time.ParseDuration(cfg.MaxSpanAge)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
@@ -44,7 +44,7 @@ func NewReader(logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, 
 		return nil, fmt.Errorf("failed to parse services query ttl: %w", err)
 	}
 
-	return &Reader{
+	reader := &Reader{
 		svc:                  svc,
 		cfg:                  cfg,
 		logger:               logger,
@@ -52,7 +52,12 @@ func NewReader(logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, 
 		dependenciesQueryTTL: dependenciesQueryTTL,
 		servicesQueryTTL:     servicesQueryTTL,
 		athenaQueryCache:     NewAthenaQueryCache(logger, svc, cfg.WorkGroup),
-	}, nil
+	}
+
+	reader.dependenciesPrefetch = NewDependenciesPrefetch(ctx, logger, reader, dependenciesQueryTTL, cfg.DependenciesPrefetch)
+	reader.dependenciesPrefetch.Start()
+
+	return reader, nil
 }
 
 type Reader struct {
@@ -63,6 +68,7 @@ type Reader struct {
 	dependenciesQueryTTL time.Duration
 	servicesQueryTTL     time.Duration
 	athenaQueryCache     *AthenaQueryCache
+	dependenciesPrefetch *DependenciesPrefetch
 }
 
 const (

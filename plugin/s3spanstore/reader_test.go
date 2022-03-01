@@ -31,7 +31,7 @@ func NewTestReader(ctx context.Context, assert *assert.Assertions, mockSvc *mock
 		JSONFormat: true,
 	})
 
-	reader, err := NewReader(logger, mockSvc, config.Athena{
+	reader, err := NewReader(ctx, logger, mockSvc, config.Athena{
 		DatabaseName:         "default",
 		SpansTableName:       "jaeger_spans",
 		OperationsTableName:  "jaeger_operations",
