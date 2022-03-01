@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
+	"golang.org/x/sync/errgroup"
 )
 
 // mockgen -destination=./plugin/s3spanstore/mocks/mock_s3.go -package=mocks github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore S3API
@@ -30,7 +31,8 @@ type S3API interface {
 type Writer struct {
 	logger hclog.Logger
 
-	parquetWriters []IParquetWriter
+	spanParquetWriter       IParquetWriter
+	operationsParquetWriter IParquetWriter
 }
 
 func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
@@ -92,12 +94,12 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		}
 	}
 
-	spanParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.SpansPrefix)
+	spanParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.SpansPrefix, new(SpanRecord))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	operationsParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.OperationsPrefix)
+	operationsParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.OperationsPrefix, new(OperationRecord))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
@@ -108,8 +110,9 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 	}
 
 	w := &Writer{
-		logger:         logger,
-		parquetWriters: []IParquetWriter{operationsDedupeParquetWriter, spanParquetWriter},
+		logger:                  logger,
+		operationsParquetWriter: operationsDedupeParquetWriter,
+		spanParquetWriter:       spanParquetWriter,
 	}
 
 	return w, nil
@@ -118,26 +121,55 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 	// s.logger.Debug("WriteSpan", span)
 
-	spanRecord, err := NewSpanRecordFromSpan(span)
-	if err != nil {
-		return fmt.Errorf("failed to create span record: %w", err)
-	}
+	g, gCtx := errgroup.WithContext(ctx)
 
-	for _, parquetWriter := range w.parquetWriters {
-		if err := parquetWriter.Write(ctx, span.StartTime, spanRecord); err != nil {
+	g.Go(func() error {
+		operationRecord, err := NewOperationRecordFromSpan(span)
+		if err != nil {
+			return fmt.Errorf("failed to create operation record: %w", err)
+		}
+
+		if err := w.operationsParquetWriter.Write(gCtx, span.StartTime, operationRecord); err != nil {
+			return fmt.Errorf("failed to write operation item: %w", err)
+		}
+
+		return nil
+	})
+
+	g.Go(func() error {
+		spanRecord, err := NewSpanRecordFromSpan(span)
+		if err != nil {
+			return fmt.Errorf("failed to create span record: %w", err)
+		}
+
+		if err := w.spanParquetWriter.Write(gCtx, span.StartTime, spanRecord); err != nil {
 			return fmt.Errorf("failed to write span item: %w", err)
 		}
-	}
 
-	return nil
+		return nil
+	})
+
+	return g.Wait()
 }
 
 func (w *Writer) Close() error {
-	for _, parquetWriter := range w.parquetWriters {
-		if err := parquetWriter.Close(); err != nil {
+	g := errgroup.Group{}
+
+	g.Go(func() error {
+		if err := w.spanParquetWriter.Close(); err != nil {
 			return fmt.Errorf("failed to close parquet writer: %w", err)
 		}
-	}
 
-	return nil
+		return nil
+	})
+
+	g.Go(func() error {
+		if err := w.operationsParquetWriter.Close(); err != nil {
+			return fmt.Errorf("failed to close parquet writer: %w", err)
+		}
+
+		return nil
+	})
+
+	return g.Wait()
 }
