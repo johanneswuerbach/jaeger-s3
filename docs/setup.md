@@ -29,6 +29,30 @@ resource "aws_s3_bucket" "jaeger" {
     }
   }
 
+  lifecycle_rule {
+    id      = "retention"
+    enabled = true
+
+    expiration {
+      days = 14
+    }
+
+    abort_incomplete_multipart_upload_days = 1
+
+    noncurrent_version_expiration {
+      days = 1
+    }
+  }
+
+  lifecycle_rule {
+    id      = "delete-deleted"
+    enabled = true
+
+    expiration {
+      expired_object_delete_marker = true
+    }
+  }
+
   tags = {
     managed_by = "terraform"
   }
@@ -260,7 +284,7 @@ data "aws_iam_policy_document" "jaeger" {
     resources = [
       "arn:aws:glue:*:*:catalog",
       "arn:aws:glue:*:*:database/default",
-      "arn:aws:glue:*:*:table/default/jaeger"
+      "arn:aws:glue:*:*:table/default/jaeger*"
     ]
   }
 }
