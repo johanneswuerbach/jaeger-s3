@@ -55,8 +55,8 @@ resource "aws_s3_bucket" "jaeger_athena_results" {
   }
 }
 
-resource "aws_glue_catalog_table" "jaeger" {
-  name          = "jaeger"
+resource "aws_glue_catalog_table" "jaeger_spans" {
+  name          = "jaeger_spans"
   database_name = "default"
 
   table_type = "EXTERNAL_TABLE"
@@ -129,6 +129,56 @@ resource "aws_glue_catalog_table" "jaeger" {
     columns {
       name = "references"
       type = "array<struct<trace_id:string,span_id:string,ref_type:tinyint>>"
+    }
+  }
+}
+
+resource "aws_glue_catalog_table" "jaeger_operations" {
+  name          = "jaeger_operations"
+  database_name = "default"
+
+  table_type = "EXTERNAL_TABLE"
+
+  parameters = {
+    "classification"                    = "parquet",
+    "projection.enabled"                = "true",
+    "projection.datehour.type"          = "date",
+    "projection.datehour.format"        = "yyyy/MM/dd/HH",
+    "projection.datehour.range"         = "2022/01/01/00,NOW",
+    "projection.datehour.interval"      = "1",
+    "projection.datehour.interval.unit" = "HOURS",
+    "storage.location.template"         = "s3://${aws_s3_bucket.jaeger.id}/operations/$${datehour}/"
+  }
+
+  partition_keys {
+    name = "datehour"
+    type = "string"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.jaeger.id}/operations/"
+    input_format  = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+
+      parameters = {
+        "serialization.format" = 1,
+      }
+    }
+
+    columns {
+      name = "operation_name"
+      type = "string"
+    }
+    columns {
+      name = "span_kind"
+      type = "string"
+    }
+    columns {
+      name = "service_name"
+      type = "string"
     }
   }
 }
@@ -257,11 +307,13 @@ data:
   config.yaml: >
     s3:
       bucketName: my-jaeger-s3-bucket
-      prefix: spans/
+      spansPrefix: spans/
+      operationsPrefix: operations/
       bufferDuration: 60s
     athena:
       databaseName: default
-      tableName: jaeger
+      spansTableName: jaeger_spans
+      operationsTableName: jaeger_operations
       outputLocation: s3://my-jaeger-s3-bucket-athena-results/
       workGroup: jaeger
       maxSpanAge: 336h

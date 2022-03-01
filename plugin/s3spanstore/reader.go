@@ -87,7 +87,7 @@ func (s *Reader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Tr
 		fmt.Sprintf(`trace_id = '%s'`, traceID),
 	}
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE %s`, s.cfg.TableName, strings.Join(conditions, " AND ")))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE %s`, s.cfg.SpansTableName, strings.Join(conditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -171,8 +171,8 @@ func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, err
 
 	result, err := r.queryAthenaCached(
 		ctx,
-		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.TableName, strings.Join(conditions, " AND ")),
-		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE`, r.cfg.TableName),
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.OperationsTableName, strings.Join(conditions, " AND ")),
+		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE`, r.cfg.OperationsTableName),
 		r.servicesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
@@ -217,7 +217,7 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	}
 
 	// Fetch trace ids
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, s.cfg.TableName, strings.Join(conditions, " AND "), query.NumTraces))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, s.cfg.SpansTableName, strings.Join(conditions, " AND "), query.NumTraces))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -236,7 +236,7 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIds, `', '`)),
 	}
 
-	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, s.cfg.TableName, strings.Join(spanConditions, " AND ")))
+	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, s.cfg.SpansTableName, strings.Join(spanConditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -305,7 +305,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
 			WHERE %s
 			GROUP BY 1, 2
-	`, r.cfg.TableName, r.cfg.TableName, strings.Join(conditions, " AND ")), "WITH spans_with_reference", r.dependenciesQueryTTL)
+	`, r.cfg.SpansTableName, r.cfg.SpansTableName, strings.Join(conditions, " AND ")), "WITH spans_with_reference", r.dependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}

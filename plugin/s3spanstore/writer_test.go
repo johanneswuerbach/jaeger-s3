@@ -35,8 +35,9 @@ func NewTestWriter(ctx context.Context, assert *assert.Assertions, mockSvc *mock
 	})
 
 	writer, err := NewWriter(logger, mockSvc, config.S3{
-		BucketName: "jaeger-spans",
-		Prefix:     "/spans/",
+		BucketName:       "jaeger-spans",
+		SpansPrefix:      "/spans/",
+		OperationsPrefix: "/operations/",
 	})
 
 	assert.NoError(err)
@@ -157,7 +158,7 @@ func TestWriteSpan(t *testing.T) {
 			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
 
 			return &s3.PutObjectOutput{}, nil
-		})
+		}).Times(2)
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 
@@ -195,32 +196,6 @@ func TestWriteSpan(t *testing.T) {
 	assert.NoError(localFileReader.Close())
 }
 
-func TestWriteSpanAndRotate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockSvc := mocks.NewMockS3API(ctrl)
-	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&s3.PutObjectOutput{}, nil).Times(2)
-
-	assert := assert.New(t)
-	ctx := context.TODO()
-
-	writer := NewTestWriter(ctx, assert, mockSvc)
-
-	span := NewTestSpan(assert)
-
-	assert.NoError(writer.WriteSpan(ctx, span))
-
-	assert.NoError(writer.WriteSpan(ctx, span))
-
-	assert.NoError(writer.rotateParquetWriters())
-
-	assert.NoError(writer.WriteSpan(ctx, span))
-
-	assert.NoError(writer.Close())
-}
-
 func TestWriteSpanWithTagsAndReferences(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -241,7 +216,7 @@ func TestWriteSpanWithTagsAndReferences(t *testing.T) {
 			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
 
 			return &s3.PutObjectOutput{}, nil
-		})
+		}).Times(2)
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 

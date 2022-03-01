@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -12,9 +11,6 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/johanneswuerbach/jaeger-s3/plugin/config"
-	"github.com/xitongsys/parquet-go-source/s3v2"
-	"github.com/xitongsys/parquet-go/source"
-	"github.com/xitongsys/parquet-go/writer"
 )
 
 // mockgen -destination=./plugin/s3spanstore/mocks/mock_s3.go -package=mocks github.com/johanneswuerbach/jaeger-s3/plugin/s3spanstore S3API
@@ -31,45 +27,10 @@ type S3API interface {
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
-const (
-	PARQUET_CONCURRENCY = 1
-	PARTION_FORMAT      = "2006/01/02/15"
-)
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-func RandStringBytes(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
-}
-
-func S3ParquetKey(prefix, suffix string, datehour string) string {
-	return prefix + datehour + "/" + suffix + ".parquet"
-}
-
-func S3PartitionKey(t time.Time) string {
-	return t.Format(PARTION_FORMAT)
-}
-
-type ParquetRef struct {
-	parquetWriteFile source.ParquetFile
-	parquetWriter    *writer.ParquetWriter
-}
-
 type Writer struct {
-	logger     hclog.Logger
-	svc        S3API
-	bucketName string
-	prefix     string
-	ticker     *time.Ticker
-	done       chan bool
+	logger hclog.Logger
 
-	parquetWriterRefs map[string]*ParquetRef
-	bufferMutex       sync.Mutex
-	ctx               context.Context
+	parquetWriters []IParquetWriter
 }
 
 func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
@@ -109,6 +70,20 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		bufferDuration = duration
 	}
 
+	operationsDedupeDuration := time.Hour * 1
+	if s3Config.OperationsDedupeDuration != "" {
+		duration, err := time.ParseDuration(s3Config.OperationsDedupeDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
+		}
+		operationsDedupeDuration = duration
+	}
+
+	operationsDedupeCacheSize := 10000
+	if s3Config.OperationsDedupeCacheSize > 0 {
+		operationsDedupeCacheSize = s3Config.OperationsDedupeCacheSize
+	}
+
 	ctx := context.Background()
 
 	if s3Config.EmptyBucket {
@@ -117,96 +92,27 @@ func NewWriter(logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, err
 		}
 	}
 
-	w := &Writer{
-		svc:               svc,
-		bucketName:        s3Config.BucketName,
-		prefix:            s3Config.Prefix,
-		logger:            logger,
-		ticker:            time.NewTicker(bufferDuration),
-		done:              make(chan bool),
-		parquetWriterRefs: map[string]*ParquetRef{},
-		ctx:               ctx,
-	}
-
-	go func() {
-		for {
-			select {
-			case <-w.done:
-				return
-			case <-w.ticker.C:
-				if err := w.rotateParquetWriters(); err != nil {
-					w.logger.Error("failed to rotate parquet writer", err)
-				}
-			}
-		}
-	}()
-
-	return w, nil
-}
-
-func (w *Writer) getParquetWriter(datehour string) (*writer.ParquetWriter, error) {
-	if w.parquetWriterRefs[datehour] != nil {
-		return w.parquetWriterRefs[datehour].parquetWriter, nil
-	}
-
-	writeFile, err := s3v2.NewS3FileWriterWithClient(w.ctx, w.svc, w.bucketName, w.parquetKey(datehour), nil)
+	spanParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.SpansPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create parquet s3 client: %w", err)
-	}
-
-	parquetWriter, err := writer.NewParquetWriter(writeFile, new(SpanRecord), PARQUET_CONCURRENCY)
-	if err != nil {
-		writeFile.Close()
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	w.parquetWriterRefs[datehour] = &ParquetRef{
-		parquetWriteFile: writeFile,
-		parquetWriter:    parquetWriter,
+	operationsParquetWriter, err := NewParquetWriter(ctx, logger, svc, bufferDuration, s3Config.BucketName, s3Config.OperationsPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	return parquetWriter, nil
-}
-
-func (w *Writer) parquetKey(datehour string) string {
-	return S3ParquetKey(w.prefix, RandStringBytes(32), datehour)
-}
-
-func (w *Writer) closeParquetWriter(parquetRef *ParquetRef) error {
-	if parquetRef.parquetWriter != nil {
-		if err := parquetRef.parquetWriter.WriteStop(); err != nil {
-			return fmt.Errorf("parquet write stop error: %w", err)
-		}
+	operationsDedupeParquetWriter, err := NewDedupeParquetWriter(logger, operationsDedupeDuration, operationsDedupeCacheSize, operationsParquetWriter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	if parquetRef.parquetWriteFile != nil {
-		if err := parquetRef.parquetWriteFile.Close(); err != nil {
-			return fmt.Errorf("parquet file write close error: %w", err)
-		}
+	w := &Writer{
+		logger:         logger,
+		parquetWriters: []IParquetWriter{operationsDedupeParquetWriter, spanParquetWriter},
 	}
 
-	return nil
-}
-
-func (w *Writer) rotateParquetWriters() error {
-	w.bufferMutex.Lock()
-
-	writerRefs := w.parquetWriterRefs
-	w.parquetWriterRefs = map[string]*ParquetRef{}
-
-	w.bufferMutex.Unlock()
-
-	return w.closeParquetWriters(writerRefs)
-}
-
-func (w *Writer) closeParquetWriters(parquetWriterRefs map[string]*ParquetRef) error {
-	for _, writerRef := range parquetWriterRefs {
-		if err := w.closeParquetWriter(writerRef); err != nil {
-			return fmt.Errorf("failed to close previous parquet writer: %w", err)
-		}
-	}
-
-	return nil
+	return w, nil
 }
 
 func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
@@ -217,28 +123,21 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 		return fmt.Errorf("failed to create span record: %w", err)
 	}
 
-	w.bufferMutex.Lock()
-	defer w.bufferMutex.Unlock()
-
-	spanDatehour := S3PartitionKey(span.StartTime)
-
-	parquetWriter, err := w.getParquetWriter(spanDatehour)
-	if err != nil {
-		return fmt.Errorf("failed to get parquet writer: %w", err)
+	for _, parquetWriter := range w.parquetWriters {
+		if err := parquetWriter.Write(ctx, span.StartTime, spanRecord); err != nil {
+			return fmt.Errorf("failed to write span item: %w", err)
+		}
 	}
 
-	if err := parquetWriter.Write(spanRecord); err != nil {
-		return fmt.Errorf("failed to write span item: %w", err)
-	}
 	return nil
 }
 
 func (w *Writer) Close() error {
-	w.ticker.Stop()
-	w.done <- true
+	for _, parquetWriter := range w.parquetWriters {
+		if err := parquetWriter.Close(); err != nil {
+			return fmt.Errorf("failed to close parquet writer: %w", err)
+		}
+	}
 
-	w.bufferMutex.Lock()
-	defer w.bufferMutex.Unlock()
-
-	return w.closeParquetWriters(w.parquetWriterRefs)
+	return nil
 }

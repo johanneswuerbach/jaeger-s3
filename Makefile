@@ -49,3 +49,7 @@ lint: ## Lint the code
 
 bench: ## Run jaeger plugin benchmarks
 	docker compose run --rm test go test -benchmem -bench=. ./...
+
+.PHONY: setup
+setup: ## Run the setup
+	go run setup/setup.go
