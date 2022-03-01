@@ -49,6 +49,10 @@ type operation struct {
 	name string
 }
 
+func (o operation) DedupeKey() string {
+	return o.name
+}
+
 func TestDedupeParquetWriter(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
