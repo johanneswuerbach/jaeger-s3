@@ -6,8 +6,9 @@ on:
       - completed
 
 permissions:
-  id-token: write
+  checks: write
   contents: read
+  id-token: write
 
 jobs:
   test-jaeger-grpc-integration:
