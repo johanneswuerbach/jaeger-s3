@@ -19,12 +19,11 @@ jobs:
       - uses: LouisBrunner/checks-action@v1.1.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: test-jaeger-grpc-integration
+          name: test-e2e
           status: in_progress
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Configure AWS credentials from CI account
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -39,5 +38,5 @@ jobs:
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: test-jaeger-grpc-integration
+          name: test-e2e
           conclusion: ${{ job.status }}
