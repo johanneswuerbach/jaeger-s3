@@ -138,6 +138,23 @@ func TestS3ParquetKey(t *testing.T) {
 	assert.Equal("prefix/2021/01/30/18/random.parquet", S3ParquetKey("prefix/", "random", S3PartitionKey(testTime2)))
 }
 
+func localTestObjects(test *S3PutTest, assert *assert.Assertions) func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	return func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+		file, err := ioutil.TempFile("", "write-span")
+		assert.NoError(err)
+		test.objects = append(test.objects, &S3PutObject{
+			key:      *input.Key,
+			fileName: file.Name(),
+		})
+
+		dat, err := ioutil.ReadAll(input.Body)
+		assert.NoError(err)
+		assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
+
+		return &s3.PutObjectOutput{}, nil
+	}
+}
+
 func TestWriteSpan(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -147,18 +164,11 @@ func TestWriteSpan(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.TODO()
 
-	file, err := ioutil.TempFile("", "write-span")
-	assert.NoError(err)
-	defer os.Remove(file.Name())
+	putTest := NewS3PutTest()
+	defer putTest.Clean()
 
 	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-			dat, err := ioutil.ReadAll(input.Body)
-			assert.NoError(err)
-			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
-
-			return &s3.PutObjectOutput{}, nil
-		}).Times(2)
+		localTestObjects(putTest, assert)).Times(2)
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 
@@ -168,7 +178,10 @@ func TestWriteSpan(t *testing.T) {
 
 	assert.NoError(writer.Close())
 
-	localFileReader, err := local.NewLocalFileReader(file.Name())
+	spansFile := putTest.SpansFile()
+	assert.NotEmpty(spansFile)
+
+	localFileReader, err := local.NewLocalFileReader(spansFile)
 	assert.NoError(err)
 	pr, err := reader.NewParquetReader(localFileReader, new(SpanRecord), 1)
 	assert.NoError(err)
@@ -196,6 +209,41 @@ func TestWriteSpan(t *testing.T) {
 	assert.NoError(localFileReader.Close())
 }
 
+type S3PutTest struct {
+	objects []*S3PutObject
+}
+
+func NewS3PutTest() *S3PutTest {
+	return &S3PutTest{
+		objects: []*S3PutObject{},
+	}
+}
+
+func (p *S3PutTest) Clean() {
+	for _, object := range p.objects {
+		os.Remove(object.fileName)
+	}
+}
+
+func (p *S3PutTest) SpansFile() string {
+	return p.FileWithPrefix("/spans")
+}
+
+func (p *S3PutTest) OperationsFile() string {
+	return p.FileWithPrefix("/operations")
+}
+
+func (p *S3PutTest) FileWithPrefix(prefix string) string {
+	spansFile := ""
+	for _, object := range p.objects {
+		if strings.HasPrefix(object.key, prefix) {
+			spansFile = object.fileName
+		}
+	}
+
+	return spansFile
+}
+
 type S3PutObject struct {
 	key      string
 	fileName string
@@ -210,28 +258,11 @@ func TestWriteSpanTwice(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.TODO()
 
-	objects := []*S3PutObject{}
-	defer func() {
-		for _, object := range objects {
-			os.Remove(object.fileName)
-		}
-	}()
+	putTest := NewS3PutTest()
+	defer putTest.Clean()
 
 	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-			file, err := ioutil.TempFile("", "write-span")
-			assert.NoError(err)
-			objects = append(objects, &S3PutObject{
-				key:      *input.Key,
-				fileName: file.Name(),
-			})
-
-			dat, err := ioutil.ReadAll(input.Body)
-			assert.NoError(err)
-			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
-
-			return &s3.PutObjectOutput{}, nil
-		}).Times(2)
+		localTestObjects(putTest, assert)).Times(2)
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 
@@ -242,13 +273,7 @@ func TestWriteSpanTwice(t *testing.T) {
 
 	assert.NoError(writer.Close())
 
-	spansFile := ""
-	for _, object := range objects {
-		if strings.HasPrefix(object.key, "/spans") {
-			spansFile = object.fileName
-		}
-	}
-
+	spansFile := putTest.SpansFile()
 	assert.NotEmpty(spansFile)
 
 	localFileReader, err := local.NewLocalFileReader(spansFile)
@@ -262,13 +287,7 @@ func TestWriteSpanTwice(t *testing.T) {
 	pr.ReadStop()
 	assert.NoError(localFileReader.Close())
 
-	operationsFile := ""
-	for _, object := range objects {
-		if strings.HasPrefix(object.key, "/operations") {
-			operationsFile = object.fileName
-		}
-	}
-
+	operationsFile := putTest.OperationsFile()
 	assert.NotEmpty(operationsFile)
 
 	localFileReaderOperations, err := local.NewLocalFileReader(operationsFile)
@@ -292,18 +311,11 @@ func TestWriteSpanWithTagsAndReferences(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.TODO()
 
-	file, err := ioutil.TempFile("", "write-span")
-	assert.NoError(err)
-	defer os.Remove(file.Name())
+	putTest := NewS3PutTest()
+	defer putTest.Clean()
 
 	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-			dat, err := ioutil.ReadAll(input.Body)
-			assert.NoError(err)
-			assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
-
-			return &s3.PutObjectOutput{}, nil
-		}).Times(2)
+		localTestObjects(putTest, assert)).Times(2)
 
 	writer := NewTestWriter(ctx, assert, mockSvc)
 
@@ -312,7 +324,10 @@ func TestWriteSpanWithTagsAndReferences(t *testing.T) {
 	assert.NoError(writer.WriteSpan(ctx, span))
 	assert.NoError(writer.Close())
 
-	localFileReader, err := local.NewLocalFileReader(file.Name())
+	spansFile := putTest.SpansFile()
+	assert.NotEmpty(spansFile)
+
+	localFileReader, err := local.NewLocalFileReader(spansFile)
 	assert.NoError(err)
 	pr, err := reader.NewParquetReader(localFileReader, new(SpanRecord), 1)
 	assert.NoError(err)
