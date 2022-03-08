@@ -26,7 +26,7 @@ jobs:
             {
               "summary": "See details in ${{ github.event.workflow_run.html_url }}"
             }
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Configure AWS credentials from CI account
