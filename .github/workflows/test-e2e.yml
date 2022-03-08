@@ -21,6 +21,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: test-e2e
           status: in_progress
+          sha: ${{ github.event.pull_request.head.sha }}
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -40,3 +41,4 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: test-e2e
           conclusion: ${{ job.status }}
+          sha: ${{ github.event.pull_request.head.sha }}
