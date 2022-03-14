@@ -72,7 +72,7 @@ func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config con
 		bufferDuration = duration
 	}
 
-	operationsDedupeDuration := time.Hour * 1
+	operationsDedupeDuration := time.Hour * 12
 	if s3Config.OperationsDedupeDuration != "" {
 		duration, err := time.ParseDuration(s3Config.OperationsDedupeDuration)
 		if err != nil {
