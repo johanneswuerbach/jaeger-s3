@@ -3,7 +3,7 @@ module github.com/johanneswuerbach/jaeger-s3
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.15.0
+	github.com/aws/aws-sdk-go-v2 v1.16.1
 	github.com/aws/aws-sdk-go-v2/config v1.15.0
 	github.com/aws/aws-sdk-go-v2/service/athena v1.14.0
 	github.com/aws/aws-sdk-go-v2/service/glue v1.21.0
@@ -39,7 +39,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.13.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.16.0 // indirect
-	github.com/aws/smithy-go v1.11.1 // indirect
+	github.com/aws/smithy-go v1.11.2 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgraph-io/ristretto v0.1.0 // indirect
