@@ -19,6 +19,7 @@ type Athena struct {
 	MaxSpanAge           string
 	DependenciesQueryTTL string
 	ServicesQueryTTL     string
+	MaxTraceDuration     string
 	DependenciesPrefetch bool
 }
 
