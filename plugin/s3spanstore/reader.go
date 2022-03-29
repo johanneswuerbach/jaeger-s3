@@ -2,7 +2,6 @@ package s3spanstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -187,62 +186,23 @@ func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, err
 	return result, nil
 }
 
-func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
-	s.logger.Trace("FindTraces", query)
+func (r *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
+	r.logger.Trace("FindTraces", query)
 	span, _ := opentracing.StartSpanFromContext(ctx, "FindTraces")
 	defer span.Finish()
 
-	// TODO Prevent SQL injections
-	conditions := []string{fmt.Sprintf(`service_name = '%s'`, query.ServiceName)}
-
-	if query.OperationName != "" {
-		conditions = append(conditions, fmt.Sprintf(`operation_name = '%s'`, query.OperationName))
-	}
-
-	for key, value := range query.Tags {
-		conditions = append(conditions, fmt.Sprintf(`tags['%s'] = '%s'`, key, value))
-	}
-
-	if query.StartTimeMin.IsZero() {
-		query.StartTimeMin = s.DefaultMinTime()
-	}
-
-	if query.StartTimeMax.IsZero() {
-		query.StartTimeMax = s.DefaultMaxTime()
-	}
-
-	conditions = append(conditions, fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Format(PARTION_FORMAT), query.StartTimeMax.Format(PARTION_FORMAT)))
-	conditions = append(conditions, fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, query.StartTimeMin.Format(ATHENA_TIMEFORMAT), query.StartTimeMax.Format(ATHENA_TIMEFORMAT)))
-
-	if query.DurationMin.String() != "0s" && query.DurationMax.String() != "0s" {
-		conditions = append(conditions, fmt.Sprintf(`duration BETWEEN %d AND %d`, query.DurationMin.Nanoseconds(), query.DurationMax.Nanoseconds()))
-	} else if query.DurationMin.String() != "0s" {
-		conditions = append(conditions, fmt.Sprintf(`duration >= %d`, query.DurationMin.Nanoseconds()))
-	} else if query.DurationMax.String() != "0s" {
-		conditions = append(conditions, fmt.Sprintf(`duration <= %d`, query.DurationMax.Nanoseconds()))
-	}
-
-	// Fetch trace ids
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, s.cfg.SpansTableName, strings.Join(conditions, " AND "), query.NumTraces))
+	traceIDs, err := r.findTraceIDs(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query athena: %w", err)
-	}
-	if len(result) == 0 {
-		return nil, nil
-	}
-
-	traceIds := make([]string, len(result))
-	for i, v := range result {
-		traceIds[i] = *v.Data[0].VarCharValue
+		return nil, fmt.Errorf("failed to query trace ids: %w", err)
 	}
 
 	// Fetch span details
 	spanConditions := []string{
-		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
-		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIds, `', '`)),
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, r.DefaultMinTime().Format(PARTION_FORMAT), r.DefaultMaxTime().Format(PARTION_FORMAT)),
+		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIDs, `', '`)),
 	}
 
-	spanResult, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, s.cfg.SpansTableName, strings.Join(spanConditions, " AND ")))
+	spanResult, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, r.cfg.SpansTableName, strings.Join(spanConditions, " AND ")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -274,13 +234,82 @@ func (s *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	return traces, nil
 }
 
-// This method is not used
-func (s *Reader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]model.TraceID, error) {
-	s.logger.Trace("FindTraceIDs", query)
+func (r *Reader) FindTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]model.TraceID, error) {
+	r.logger.Trace("FindTraceIDs", query)
 	span, _ := opentracing.StartSpanFromContext(ctx, "FindTraceIDs")
 	defer span.Finish()
 
-	return nil, errors.New("not implemented")
+	traceIDStrings, err := r.findTraceIDs(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query trace ids: %w", err)
+	}
+
+	if traceIDStrings == nil {
+		return nil, nil
+	}
+
+	traceIDs := make([]model.TraceID, len(traceIDStrings))
+	for i, v := range traceIDStrings {
+		traceID, err := model.TraceIDFromString(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert trace id: %w", err)
+		}
+
+		traceIDs[i] = traceID
+	}
+
+	return traceIDs, nil
+}
+
+func (r *Reader) findTraceIDs(ctx context.Context, query *spanstore.TraceQueryParameters) ([]string, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "findTraceIDs")
+	defer span.Finish()
+
+	// TODO Prevent SQL injections
+	conditions := []string{fmt.Sprintf(`service_name = '%s'`, query.ServiceName)}
+
+	if query.OperationName != "" {
+		conditions = append(conditions, fmt.Sprintf(`operation_name = '%s'`, query.OperationName))
+	}
+
+	for key, value := range query.Tags {
+		conditions = append(conditions, fmt.Sprintf(`tags['%s'] = '%s'`, key, value))
+	}
+
+	if query.StartTimeMin.IsZero() {
+		query.StartTimeMin = r.DefaultMinTime()
+	}
+
+	if query.StartTimeMax.IsZero() {
+		query.StartTimeMax = r.DefaultMaxTime()
+	}
+
+	conditions = append(conditions, fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Format(PARTION_FORMAT), query.StartTimeMax.Format(PARTION_FORMAT)))
+	conditions = append(conditions, fmt.Sprintf(`start_time BETWEEN timestamp '%s' AND timestamp '%s'`, query.StartTimeMin.Format(ATHENA_TIMEFORMAT), query.StartTimeMax.Format(ATHENA_TIMEFORMAT)))
+
+	if query.DurationMin.String() != "0s" && query.DurationMax.String() != "0s" {
+		conditions = append(conditions, fmt.Sprintf(`duration BETWEEN %d AND %d`, query.DurationMin.Nanoseconds(), query.DurationMax.Nanoseconds()))
+	} else if query.DurationMin.String() != "0s" {
+		conditions = append(conditions, fmt.Sprintf(`duration >= %d`, query.DurationMin.Nanoseconds()))
+	} else if query.DurationMax.String() != "0s" {
+		conditions = append(conditions, fmt.Sprintf(`duration <= %d`, query.DurationMax.Nanoseconds()))
+	}
+
+	// Fetch trace ids
+	result, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, r.cfg.SpansTableName, strings.Join(conditions, " AND "), query.NumTraces))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query athena: %w", err)
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+
+	traceIds := make([]string, len(result))
+	for i, v := range result {
+		traceIds[i] = *v.Data[0].VarCharValue
+	}
+
+	return traceIds, nil
 }
 
 func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
