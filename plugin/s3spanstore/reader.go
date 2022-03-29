@@ -27,6 +27,10 @@ type AthenaAPI interface {
 	StopQueryExecution(ctx context.Context, params *athena.StopQueryExecutionInput, optFns ...func(*athena.Options)) (*athena.StopQueryExecutionOutput, error)
 }
 
+var (
+	defaultMaxTraceDuration = time.Hour * 24
+)
+
 func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, error) {
 	maxSpanAge, err := time.ParseDuration(cfg.MaxSpanAge)
 	if err != nil {
@@ -43,6 +47,16 @@ func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg conf
 		return nil, fmt.Errorf("failed to parse services query ttl: %w", err)
 	}
 
+	var maxTraceDuration time.Duration
+	if cfg.MaxTraceDuration == "" {
+		maxTraceDuration = defaultMaxTraceDuration
+	} else {
+		maxTraceDuration, err = time.ParseDuration(cfg.MaxTraceDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse max trace duration: %w", err)
+		}
+	}
+
 	reader := &Reader{
 		svc:                  svc,
 		cfg:                  cfg,
@@ -51,6 +65,7 @@ func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg conf
 		dependenciesQueryTTL: dependenciesQueryTTL,
 		servicesQueryTTL:     servicesQueryTTL,
 		athenaQueryCache:     NewAthenaQueryCache(logger, svc, cfg.WorkGroup),
+		maxTraceDuration:     maxTraceDuration,
 	}
 
 	reader.dependenciesPrefetch = NewDependenciesPrefetch(ctx, logger, reader, dependenciesQueryTTL, cfg.DependenciesPrefetch)
@@ -68,6 +83,7 @@ type Reader struct {
 	servicesQueryTTL     time.Duration
 	athenaQueryCache     *AthenaQueryCache
 	dependenciesPrefetch *DependenciesPrefetch
+	maxTraceDuration     time.Duration
 }
 
 const (
@@ -191,14 +207,23 @@ func (r *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 	span, _ := opentracing.StartSpanFromContext(ctx, "FindTraces")
 	defer span.Finish()
 
+	// Fetch matching trace ids
 	traceIDs, err := r.findTraceIDs(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query trace ids: %w", err)
 	}
 
-	// Fetch span details
+	if query.StartTimeMin.IsZero() {
+		query.StartTimeMin = r.DefaultMinTime()
+	}
+
+	if query.StartTimeMax.IsZero() {
+		query.StartTimeMax = r.DefaultMaxTime()
+	}
+
+	// Fetch span details, but only look into partitions +/- maxTraceDurations
 	spanConditions := []string{
-		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, r.DefaultMinTime().Format(PARTION_FORMAT), r.DefaultMaxTime().Format(PARTION_FORMAT)),
+		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Add(-r.maxTraceDuration).Format(PARTION_FORMAT), query.StartTimeMax.Add(r.maxTraceDuration).Format(PARTION_FORMAT)),
 		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIDs, `', '`)),
 	}
 
@@ -363,6 +388,9 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 }
 
 func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, lookupString string, ttl time.Duration) ([]types.Row, error) {
+	otSpan, _ := opentracing.StartSpanFromContext(ctx, "queryAthenaCached")
+	defer otSpan.Finish()
+
 	queryExecution, err := r.athenaQueryCache.Lookup(ctx, lookupString, ttl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup cached athena query: %w", err)
@@ -376,6 +404,9 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, look
 }
 
 func (r *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
+	otSpan, _ := opentracing.StartSpanFromContext(ctx, "queryAthena")
+	defer otSpan.Finish()
+
 	output, err := r.svc.StartQueryExecution(ctx, &athena.StartQueryExecutionInput{
 		QueryString: &queryString,
 		QueryExecutionContext: &types.QueryExecutionContext{
@@ -402,6 +433,9 @@ func (r *Reader) queryAthena(ctx context.Context, queryString string) ([]types.R
 }
 
 func (r *Reader) waitAndFetchQueryResult(ctx context.Context, queryExecution *types.QueryExecution) ([]types.Row, error) {
+	otSpan, _ := opentracing.StartSpanFromContext(ctx, "waitAndFetchQueryResult")
+	defer otSpan.Finish()
+
 	// Poll until the query completed
 	for {
 		if queryExecution.Status.CompletionDateTime != nil {
@@ -424,6 +458,9 @@ func (r *Reader) waitAndFetchQueryResult(ctx context.Context, queryExecution *ty
 }
 
 func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId *string) ([]types.Row, error) {
+	otSpan, _ := opentracing.StartSpanFromContext(ctx, "fetchQueryResult")
+	defer otSpan.Finish()
+
 	// Get query results
 	paginator := athena.NewGetQueryResultsPaginator(r.svc, &athena.GetQueryResultsInput{
 		QueryExecutionId: queryExecutionId,
