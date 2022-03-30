@@ -12,6 +12,5 @@ athena:
   outputLocation: s3://jaeger-s3-test-results/
   workGroup: jaeger
   maxSpanAge: 336h
-  dependenciesQueryTtl: 24h
   dependenciesPrefetch: true
   servicesQueryTtl: 10s

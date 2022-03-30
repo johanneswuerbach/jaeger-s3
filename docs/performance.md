@@ -2,9 +2,8 @@
 
 ## Production ready?
 
-The plugin is being successfully used in an environment with ~ 5000 spans/s
-and 14 days of retention. Nevertheless you should be doing your own tests
-to validate whether it fits your environment.
+The plugin is being successfully used in an environment with ~5000 spans/s and 14 days of retention
+(~7 TB data on S3). Nevertheless you should be doing your own tests to validate whether it fits your environment.
 
 ## Improve query performance
 
@@ -39,4 +38,21 @@ spec:
         cpu: 2000m
   query:
   ...
+```
+
+### Avoid high cardinality operation names
+
+As the Jaeger UI needs to load a service and operation dropdown before the user can make any input, ensuring performance of this operation
+is key to the user experience.
+
+Unique service name, operation name and span kind writes are already deduplicated by default, but using high cardinality operation names on
+S3 will result in a lot of files on S3, which decreases query performance (See Tip 4. [here](https://aws.amazon.com/blogs/big-data/top-10-performance-tuning-tips-for-amazon-athena/)).
+
+You can use the following query to get the amount of unique operation name and span kind combinations by service:
+
+```sql
+WITH uniq_pairs AS (
+    SELECT DISTINCT service_name, operation_name, span_kind FROM "jaeger_operations"
+)
+SELECT service_name, COUNT(*) AS paris FROM uniq_pairs GROUP BY 1 ORDER BY 2 DESC
 ```
