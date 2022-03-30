@@ -28,7 +28,9 @@ type AthenaAPI interface {
 }
 
 var (
-	defaultMaxTraceDuration = time.Hour * 24
+	defaultMaxTraceDuration     = time.Hour * 24
+	defaultDependenciesQueryTTL = time.Hour * 24
+	defaultServicesQueryTtl     = time.Second * 60
 )
 
 func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg config.Athena) (*Reader, error) {
@@ -37,24 +39,19 @@ func NewReader(ctx context.Context, logger hclog.Logger, svc AthenaAPI, cfg conf
 		return nil, fmt.Errorf("failed to parse max timeframe: %w", err)
 	}
 
-	dependenciesQueryTTL, err := time.ParseDuration(cfg.DependenciesQueryTTL)
+	dependenciesQueryTTL, err := parseDurationWithDefault(cfg.DependenciesQueryTTL, defaultDependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse dependencies query ttl: %w", err)
 	}
 
-	servicesQueryTTL, err := time.ParseDuration(cfg.ServicesQueryTTL)
+	servicesQueryTTL, err := parseDurationWithDefault(cfg.ServicesQueryTTL, defaultServicesQueryTtl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse services query ttl: %w", err)
 	}
 
-	var maxTraceDuration time.Duration
-	if cfg.MaxTraceDuration == "" {
-		maxTraceDuration = defaultMaxTraceDuration
-	} else {
-		maxTraceDuration, err = time.ParseDuration(cfg.MaxTraceDuration)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse max trace duration: %w", err)
-		}
+	maxTraceDuration, err := parseDurationWithDefault(cfg.MaxTraceDuration, defaultMaxTraceDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse max trace duration: %w", err)
 	}
 
 	reader := &Reader{

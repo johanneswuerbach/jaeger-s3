@@ -1,7 +1,9 @@
 # jaeger-s3
 
 jaeger-s3 is gRPC storage plugin for [Jaeger](https://github.com/jaegertracing/jaeger), which uses [Amazon S3](https://aws.amazon.com/s3/)
-to store spans. The stored spans are queried using [Amazon Athena](https://aws.amazon.com/athena/).
+to store spans. [Amazon Athena](https://aws.amazon.com/athena/) is used to query the stored spans by the plugin and can be also used for
+further analytical queries. The primary goal of this plugin is to provide a mostly maintenance free, pay-as-you-go solution for AWS where you
+don't need to think about server sizing or software updates.
 
 
 ## Setup

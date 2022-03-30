@@ -2,16 +2,25 @@
 
 ## Prepare your environment
 
-Prepare our environment using terraform a comparable tool. The setup instructions are not final yet and might change in the future.
+Prepare our environment using terraform or another tool. Today only terraform instructions are provided, but PRs for other tools
+are very welcome.
+
+### Decisions
+
+The main decision to make are bucket names and the desired retention of traces in days. As traces contain a lot information, they are
+usually retained for rather short compared to more aggregated concepts like metrics. For this plugin retention is not only a question
+of storage costs, but increasing retention also results in an increased query time as some operations (e.g. find unique service name, find a
+span by ID) need to scan the entire dataset. We found that 14 days is a good compromise for debugging after an event and querying speed.
 
 ### Required resources
 
-Create an S3 bucket, a Glue table and an Athena Workgroup.
+Create an S3 bucket, a Glue table and an Athena Workgroup. Only `locals` blocks should be adjusted.
 
 ```tf
 locals {
   bucket_name                = "my-jaeger-s3-bucket"
   bucket_name_athena_results = "my-jaeger-s3-bucket-athena-results"
+  retention_in_days          = 14
 }
 
 resource "aws_s3_bucket" "jaeger" {
@@ -34,7 +43,7 @@ resource "aws_s3_bucket" "jaeger" {
     enabled = true
 
     expiration {
-      days = 14
+      days = local.retention_in_days
     }
 
     abort_incomplete_multipart_upload_days = 1
@@ -333,17 +342,14 @@ data:
       bucketName: my-jaeger-s3-bucket
       spansPrefix: spans/
       operationsPrefix: operations/
-      bufferDuration: 60s
     athena:
       databaseName: default
       spansTableName: jaeger_spans
       operationsTableName: jaeger_operations
       outputLocation: s3://my-jaeger-s3-bucket-athena-results/
       workGroup: jaeger
-      maxSpanAge: 336h
-      dependenciesQueryTtl: 24h
+      maxSpanAge: 336h # Retention days in hours
       dependenciesPrefetch: true
-      servicesQueryTtl: 60s
 
 ---
 apiVersion: v1

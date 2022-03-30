@@ -60,25 +60,23 @@ func EmptyBucket(ctx context.Context, svc S3API, bucketName string) error {
 	return nil
 }
 
+var (
+	defaultBufferDuration                        = time.Second * 60
+	defaultOperationsDedupeDuration              = time.Hour * 12
+	defaultOperationsDedupeRewriteBufferDuration = time.Hour * 1
+)
+
 func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config config.S3) (*Writer, error) {
 	rand.Seed(time.Now().UnixNano())
 
-	bufferDuration := time.Second * 60
-	if s3Config.BufferDuration != "" {
-		duration, err := time.ParseDuration(s3Config.BufferDuration)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
-		}
-		bufferDuration = duration
+	bufferDuration, err := parseDurationWithDefault(s3Config.BufferDuration, defaultBufferDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
 	}
 
-	operationsDedupeDuration := time.Hour * 12
-	if s3Config.OperationsDedupeDuration != "" {
-		duration, err := time.ParseDuration(s3Config.OperationsDedupeDuration)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
-		}
-		operationsDedupeDuration = duration
+	operationsDedupeDuration, err := parseDurationWithDefault(s3Config.OperationsDedupeDuration, defaultOperationsDedupeDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse operations dedupe duration: %w", err)
 	}
 
 	operationsDedupeCacheSize := 10000
@@ -86,13 +84,9 @@ func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config con
 		operationsDedupeCacheSize = s3Config.OperationsDedupeCacheSize
 	}
 
-	operationsDedupeRewriteBufferDuration := time.Hour * 1
-	if s3Config.OperationsDedupeRewriteBufferDuration != "" {
-		duration, err := time.ParseDuration(s3Config.OperationsDedupeRewriteBufferDuration)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
-		}
-		operationsDedupeRewriteBufferDuration = duration
+	operationsDedupeRewriteBufferDuration, err := parseDurationWithDefault(s3Config.OperationsDedupeRewriteBufferDuration, defaultOperationsDedupeRewriteBufferDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse operation dedupe rewrite buffer duration: %w", err)
 	}
 
 	if s3Config.EmptyBucket {
