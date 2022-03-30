@@ -52,11 +52,12 @@ type ParquetWriter struct {
 
 	parquetWriterRefs map[string]*ParquetRef
 	bufferMutex       sync.Mutex
+	bufferMaxUntil    *time.Time
 	ctx               context.Context
 }
 
 type IParquetWriter interface {
-	Write(ctx context.Context, time time.Time, row interface{}) error
+	Write(ctx context.Context, time time.Time, maxBufferUntil time.Time, row interface{}) error
 	Close() error
 }
 
@@ -136,8 +137,14 @@ func (w *ParquetWriter) closeParquetWriter(parquetRef *ParquetRef) error {
 func (w *ParquetWriter) rotateParquetWriters() error {
 	w.bufferMutex.Lock()
 
+	if w.bufferMaxUntil != nil && w.bufferMaxUntil.After(time.Now()) {
+		w.bufferMutex.Unlock()
+		return nil
+	}
+
 	writerRefs := w.parquetWriterRefs
 	w.parquetWriterRefs = map[string]*ParquetRef{}
+	w.bufferMaxUntil = nil
 
 	w.bufferMutex.Unlock()
 
@@ -154,9 +161,13 @@ func (w *ParquetWriter) closeParquetWriters(parquetWriterRefs map[string]*Parque
 	return nil
 }
 
-func (w *ParquetWriter) Write(ctx context.Context, time time.Time, row interface{}) error {
+func (w *ParquetWriter) Write(ctx context.Context, time time.Time, maxBufferUntil time.Time, row interface{}) error {
 	w.bufferMutex.Lock()
 	defer w.bufferMutex.Unlock()
+
+	if w.bufferMaxUntil == nil || w.bufferMaxUntil.After(maxBufferUntil) {
+		w.bufferMaxUntil = &maxBufferUntil
+	}
 
 	spanDatehour := S3PartitionKey(time)
 

@@ -1,13 +1,14 @@
 package config
 
 type S3 struct {
-	BucketName                string
-	SpansPrefix               string
-	OperationsPrefix          string
-	BufferDuration            string
-	EmptyBucket               bool
-	OperationsDedupeDuration  string
-	OperationsDedupeCacheSize int
+	BucketName                            string
+	SpansPrefix                           string
+	OperationsPrefix                      string
+	BufferDuration                        string
+	EmptyBucket                           bool
+	OperationsDedupeDuration              string
+	OperationsDedupeRewriteBufferDuration string
+	OperationsDedupeCacheSize             int
 }
 
 type Athena struct {
