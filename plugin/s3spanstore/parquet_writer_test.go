@@ -52,11 +52,38 @@ func TestWriteSpanAndRotate(t *testing.T) {
 	spanRecord, err := NewSpanRecordFromSpan(span)
 	assert.NoError(err)
 
-	assert.NoError(writer.Write(ctx, span.StartTime, spanRecord))
+	assert.NoError(writer.Write(ctx, span.StartTime, span.StartTime, spanRecord))
 
 	time.Sleep(time.Millisecond * 500)
 
-	assert.NoError(writer.Write(ctx, span.StartTime, spanRecord))
+	assert.NoError(writer.Write(ctx, span.StartTime, span.StartTime, spanRecord))
+
+	assert.NoError(writer.Close())
+}
+
+func TestWriteSpanWithLargeBufferUntilAndRotate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := mocks.NewMockS3API(ctrl)
+	mockSvc.EXPECT().PutObject(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&s3.PutObjectOutput{}, nil).Times(1)
+
+	assert := assert.New(t)
+	ctx := context.TODO()
+
+	writer := NewTestParquetWriter(ctx, assert, mockSvc)
+
+	span := NewTestSpan(assert)
+
+	spanRecord, err := NewSpanRecordFromSpan(span)
+	assert.NoError(err)
+
+	assert.NoError(writer.Write(ctx, span.StartTime, time.Now().Add(time.Millisecond*500), spanRecord))
+
+	time.Sleep(time.Millisecond * 500)
+
+	assert.NoError(writer.Write(ctx, span.StartTime, span.StartTime, spanRecord))
 
 	assert.NoError(writer.Close())
 }

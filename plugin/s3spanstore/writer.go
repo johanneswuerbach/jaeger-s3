@@ -86,6 +86,15 @@ func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config con
 		operationsDedupeCacheSize = s3Config.OperationsDedupeCacheSize
 	}
 
+	operationsDedupeRewriteBufferDuration := time.Hour * 1
+	if s3Config.OperationsDedupeRewriteBufferDuration != "" {
+		duration, err := time.ParseDuration(s3Config.OperationsDedupeRewriteBufferDuration)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse buffer duration: %w", err)
+		}
+		operationsDedupeRewriteBufferDuration = duration
+	}
+
 	if s3Config.EmptyBucket {
 		if err := EmptyBucket(ctx, svc, s3Config.BucketName); err != nil {
 			return nil, fmt.Errorf("failed to empty s3 bucket: %w", err)
@@ -102,7 +111,7 @@ func NewWriter(ctx context.Context, logger hclog.Logger, svc S3API, s3Config con
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	operationsDedupeParquetWriter, err := NewDedupeParquetWriter(logger, operationsDedupeDuration, operationsDedupeCacheSize, operationsParquetWriter)
+	operationsDedupeParquetWriter, err := NewDedupeParquetWriter(logger, operationsDedupeDuration, operationsDedupeRewriteBufferDuration, operationsDedupeCacheSize, operationsParquetWriter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
@@ -127,7 +136,7 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 			return fmt.Errorf("failed to create operation record: %w", err)
 		}
 
-		if err := w.operationsParquetWriter.Write(gCtx, span.StartTime, operationRecord); err != nil {
+		if err := w.operationsParquetWriter.Write(gCtx, span.StartTime, span.StartTime, operationRecord); err != nil {
 			return fmt.Errorf("failed to write operation item: %w", err)
 		}
 
@@ -140,7 +149,7 @@ func (w *Writer) WriteSpan(ctx context.Context, span *model.Span) error {
 			return fmt.Errorf("failed to create span record: %w", err)
 		}
 
-		if err := w.spanParquetWriter.Write(gCtx, span.StartTime, spanRecord); err != nil {
+		if err := w.spanParquetWriter.Write(gCtx, span.StartTime, span.StartTime, spanRecord); err != nil {
 			return fmt.Errorf("failed to write span item: %w", err)
 		}
 

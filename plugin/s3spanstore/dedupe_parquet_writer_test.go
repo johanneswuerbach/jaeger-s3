@@ -2,7 +2,6 @@ package s3spanstore
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +9,8 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/stretchr/testify/assert"
 )
+
+var testDedupeRewriteBufferDuration = 50 * time.Millisecond
 
 func NewTestDedupeParquetWriter(assert *assert.Assertions, parquetWriter IParquetWriter) *DedupeParquetWriter {
 	loggerName := "jaeger-s3"
@@ -25,7 +26,7 @@ func NewTestDedupeParquetWriter(assert *assert.Assertions, parquetWriter IParque
 		JSONFormat: true,
 	})
 
-	writer, err := NewDedupeParquetWriter(logger, 100*time.Millisecond, 100, parquetWriter)
+	writer, err := NewDedupeParquetWriter(logger, 100*time.Millisecond, testDedupeRewriteBufferDuration, 100, parquetWriter)
 	assert.NoError(err)
 
 	return writer
@@ -35,9 +36,13 @@ type testWriter struct {
 	writes []interface{}
 }
 
-func (w *testWriter) Write(ctx context.Context, time time.Time, row interface{}) error {
-	fmt.Println("Write", row)
-	w.writes = append(w.writes, row)
+type writeItem struct {
+	row            interface{}
+	maxBufferUntil time.Time
+}
+
+func (w *testWriter) Write(ctx context.Context, time time.Time, maxBufferUntil time.Time, row interface{}) error {
+	w.writes = append(w.writes, writeItem{row: row, maxBufferUntil: maxBufferUntil})
 	return nil
 }
 
@@ -60,15 +65,15 @@ func TestDedupeParquetWriter(t *testing.T) {
 	testWriter := &testWriter{writes: []interface{}{}}
 	writer := NewTestDedupeParquetWriter(assert, testWriter)
 
-	time := time.Now()
+	timeNow := time.Now()
 
-	assert.NoError(writer.Write(ctx, time, operation{name: "a"}))
-	assert.NoError(writer.Write(ctx, time, operation{name: "a"}))
-	assert.NoError(writer.Write(ctx, time, operation{name: "b"}))
+	assert.NoError(writer.Write(ctx, timeNow, timeNow, operation{name: "a"}))
+	assert.NoError(writer.Write(ctx, timeNow, timeNow, operation{name: "a"}))
+	assert.NoError(writer.Write(ctx, timeNow, timeNow, operation{name: "b"}))
 
 	assert.Equal([]interface{}{
-		operation{name: "a"},
-		operation{name: "b"},
+		writeItem{row: operation{name: "a"}, maxBufferUntil: timeNow},
+		writeItem{row: operation{name: "b"}, maxBufferUntil: timeNow},
 	}, testWriter.writes)
 }
 
@@ -80,12 +85,13 @@ func TestDedupeParquetWriterWritesAgain(t *testing.T) {
 	writer := NewTestDedupeParquetWriter(assert, testWriter)
 
 	timeNow := time.Now()
+	futureTimeNow := timeNow.Add(200 * time.Millisecond)
 
-	assert.NoError(writer.Write(ctx, timeNow, operation{name: "a"}))
-	assert.NoError(writer.Write(ctx, timeNow.Add(200*time.Millisecond), operation{name: "a"}))
+	assert.NoError(writer.Write(ctx, timeNow, timeNow, operation{name: "a"}))
+	assert.NoError(writer.Write(ctx, futureTimeNow, futureTimeNow, operation{name: "a"}))
 
 	assert.Equal([]interface{}{
-		operation{name: "a"},
-		operation{name: "a"},
+		writeItem{row: operation{name: "a"}, maxBufferUntil: timeNow},
+		writeItem{row: operation{name: "a"}, maxBufferUntil: futureTimeNow.Add(testDedupeRewriteBufferDuration)},
 	}, testWriter.writes)
 }
