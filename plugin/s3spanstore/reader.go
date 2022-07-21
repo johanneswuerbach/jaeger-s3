@@ -479,3 +479,8 @@ func (r *Reader) fetchQueryResult(ctx context.Context, queryExecutionId *string)
 
 	return rows, nil
 }
+
+func (r *Reader) Close() error {
+	r.dependenciesPrefetch.Stop()
+	return nil
+}
