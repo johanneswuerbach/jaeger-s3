@@ -102,10 +102,11 @@ func (s *Reader) GetTrace(ctx context.Context, traceID model.TraceID) (*model.Tr
 
 	conditions := []string{
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, s.DefaultMinTime().Format(PARTION_FORMAT), s.DefaultMaxTime().Format(PARTION_FORMAT)),
-		fmt.Sprintf(`trace_id = '%s'`, traceID),
+		`trace_id = ?`,
 	}
+	parameters := []string{traceID.String()}
 
-	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE %s`, s.cfg.SpansTableName, strings.Join(conditions, " AND ")))
+	result, err := s.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT span_payload FROM "%s" WHERE %s`, s.cfg.SpansTableName, strings.Join(conditions, " AND ")), parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -190,6 +191,7 @@ func (r *Reader) getServicesAndOperations(ctx context.Context) ([]types.Row, err
 	result, err := r.queryAthenaCached(
 		ctx,
 		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE %s GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`, r.cfg.OperationsTableName, strings.Join(conditions, " AND ")),
+		nil,
 		fmt.Sprintf(`SELECT service_name, operation_name, span_kind FROM "%s" WHERE`, r.cfg.OperationsTableName),
 		r.servicesQueryTTL)
 	if err != nil {
@@ -223,8 +225,9 @@ func (r *Reader) FindTraces(ctx context.Context, query *spanstore.TraceQueryPara
 		fmt.Sprintf(`datehour BETWEEN '%s' AND '%s'`, query.StartTimeMin.Add(-r.maxTraceDuration).Format(PARTION_FORMAT), query.StartTimeMax.Add(r.maxTraceDuration).Format(PARTION_FORMAT)),
 		fmt.Sprintf(`trace_id IN ('%s')`, strings.Join(traceIDs, `', '`)),
 	}
+	// Still use a string here as Athena only supports up to 25 parameters, which is fine as the IDs are returned by the query before.
 
-	spanResult, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, r.cfg.SpansTableName, strings.Join(spanConditions, " AND ")))
+	spanResult, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT DISTINCT trace_id, span_payload FROM "%s" WHERE %s`, r.cfg.SpansTableName, strings.Join(spanConditions, " AND ")), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -287,15 +290,17 @@ func (r *Reader) findTraceIDs(ctx context.Context, query *spanstore.TraceQueryPa
 	span, _ := opentracing.StartSpanFromContext(ctx, "findTraceIDs")
 	defer span.Finish()
 
-	// TODO Prevent SQL injections
-	conditions := []string{fmt.Sprintf(`service_name = '%s'`, query.ServiceName)}
+	conditions := []string{`service_name = ?`}
+	parameters := []string{query.ServiceName}
 
 	if query.OperationName != "" {
-		conditions = append(conditions, fmt.Sprintf(`operation_name = '%s'`, query.OperationName))
+		conditions = append(conditions, `operation_name = ?`)
+		parameters = append(parameters, query.OperationName)
 	}
 
 	for key, value := range query.Tags {
-		conditions = append(conditions, fmt.Sprintf(`tags['%s'] = '%s'`, key, value))
+		conditions = append(conditions, `tags[?] = ?`)
+		parameters = append(parameters, key, value)
 	}
 
 	if query.StartTimeMin.IsZero() {
@@ -318,7 +323,7 @@ func (r *Reader) findTraceIDs(ctx context.Context, query *spanstore.TraceQueryPa
 	}
 
 	// Fetch trace ids
-	result, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, r.cfg.SpansTableName, strings.Join(conditions, " AND "), query.NumTraces))
+	result, err := r.queryAthena(ctx, fmt.Sprintf(`SELECT trace_id FROM "%s" WHERE %s GROUP BY 1 LIMIT %d`, r.cfg.SpansTableName, strings.Join(conditions, " AND "), query.NumTraces), parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -362,7 +367,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 			JOIN %s as jaeger ON spans_with_references.ref_trace_id = jaeger.trace_id AND spans_with_references.ref_span_id = jaeger.span_id
 			WHERE %s
 			GROUP BY 1, 2
-	`, r.cfg.SpansTableName, r.cfg.SpansTableName, strings.Join(conditions, " AND ")), "WITH spans_with_reference", r.dependenciesQueryTTL)
+	`, r.cfg.SpansTableName, r.cfg.SpansTableName, strings.Join(conditions, " AND ")), nil, "WITH spans_with_reference", r.dependenciesQueryTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query athena: %w", err)
 	}
@@ -384,7 +389,7 @@ func (r *Reader) GetDependencies(ctx context.Context, endTs time.Time, lookback 
 	return dependencyLinks, nil
 }
 
-func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, lookupString string, ttl time.Duration) ([]types.Row, error) {
+func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, parameters []string, lookupString string, ttl time.Duration) ([]types.Row, error) {
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "queryAthenaCached")
 	defer otSpan.Finish()
 
@@ -397,10 +402,10 @@ func (r *Reader) queryAthenaCached(ctx context.Context, queryString string, look
 		return r.waitAndFetchQueryResult(ctx, queryExecution)
 	}
 
-	return r.queryAthena(ctx, queryString)
+	return r.queryAthena(ctx, queryString, parameters)
 }
 
-func (r *Reader) queryAthena(ctx context.Context, queryString string) ([]types.Row, error) {
+func (r *Reader) queryAthena(ctx context.Context, queryString string, parameters []string) ([]types.Row, error) {
 	otSpan, _ := opentracing.StartSpanFromContext(ctx, "queryAthena")
 	defer otSpan.Finish()
 
@@ -412,7 +417,8 @@ func (r *Reader) queryAthena(ctx context.Context, queryString string) ([]types.R
 		ResultConfiguration: &types.ResultConfiguration{
 			OutputLocation: &r.cfg.OutputLocation,
 		},
-		WorkGroup: &r.cfg.WorkGroup,
+		ExecutionParameters: parameters,
+		WorkGroup:           &r.cfg.WorkGroup,
 	})
 
 	if err != nil {
