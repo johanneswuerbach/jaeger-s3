@@ -79,6 +79,7 @@ func main() {
 
 	logger.Debug("plugin created")
 	grpc.Serve(&shared.PluginServices{
-		Store: s3Plugin,
+		Store:               s3Plugin,
+		StreamingSpanWriter: s3Plugin,
 	})
 }
