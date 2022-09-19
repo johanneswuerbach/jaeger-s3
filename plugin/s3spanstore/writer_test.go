@@ -2,7 +2,7 @@ package s3spanstore
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -140,16 +140,16 @@ func TestS3ParquetKey(t *testing.T) {
 
 func localTestObjects(test *S3PutTest, assert *assert.Assertions) func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	return func(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
-		file, err := ioutil.TempFile("", "write-span")
+		file, err := os.CreateTemp("", "write-span")
 		assert.NoError(err)
 		test.objects = append(test.objects, &S3PutObject{
 			key:      *input.Key,
 			fileName: file.Name(),
 		})
 
-		dat, err := ioutil.ReadAll(input.Body)
+		dat, err := io.ReadAll(input.Body)
 		assert.NoError(err)
-		assert.NoError(ioutil.WriteFile(file.Name(), dat, 0644))
+		assert.NoError(os.WriteFile(file.Name(), dat, 0644))
 
 		return &s3.PutObjectOutput{}, nil
 	}
