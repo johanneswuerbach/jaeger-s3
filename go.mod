@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/aws/aws-sdk-go-v2 v1.16.15
 	github.com/aws/aws-sdk-go-v2/config v1.17.6
-	github.com/aws/aws-sdk-go-v2/service/athena v1.18.8
+	github.com/aws/aws-sdk-go-v2/service/athena v1.18.9
 	github.com/aws/aws-sdk-go-v2/service/glue v1.30.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.27.10
 	github.com/gogo/protobuf v1.3.2
