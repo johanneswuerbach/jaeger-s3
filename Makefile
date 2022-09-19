@@ -45,7 +45,7 @@ test-jaeger-grpc-integration: ## Run jaeger integration tests for grpc plugins
 	docker compose run --rm test-jaeger-grpc-integration go test -run 'TestGRPCStorage' -tags=grpc_storage_integration -v -race -count=1 ./plugin/storage/integration/...
 
 lint: ## Lint the code
-	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:v1.44.2 golangci-lint run -v --timeout 5m
+	docker run --rm -v $(PWD):/app -w /app golangci/golangci-lint:v1.49.0 golangci-lint run -v --timeout 5m
 
 bench: ## Run jaeger plugin benchmarks
 	docker compose run --rm test go test -benchmem -bench=. ./...
