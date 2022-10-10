@@ -13,7 +13,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/hashicorp/go-hclog v1.3.1
 	github.com/hashicorp/golang-lru v0.5.4
-	github.com/jaegertracing/jaeger v1.38.0
+	github.com/jaegertracing/jaeger v1.38.1
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/ory/viper v1.7.5
 	github.com/spf13/pflag v1.0.5
@@ -77,7 +77,7 @@ require (
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.23.0 // indirect
-	golang.org/x/net v0.0.0-20220923203811-8be639271d50 // indirect
+	golang.org/x/net v0.0.0-20220926192436-02166a98028e // indirect
 	golang.org/x/sys v0.0.0-20220919091848-fb04ddd9f9c8 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
