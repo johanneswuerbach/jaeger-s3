@@ -222,8 +222,8 @@ github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.14/go.mod h1:AyGgqiKv9ECM6IZeNQtd
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.16 h1:2EXB7dtGwRYIN3XQ9qwIW504DVbKIw3r89xQnonGdsQ=
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.0.16/go.mod h1:XH+3h395e3WVdd6T2Z3mPxuI+x/HVtdqVOREkTiyubs=
 github.com/aws/aws-sdk-go-v2/service/appconfig v1.4.2/go.mod h1:FZ3HkCe+b10uFZZkFdvf98LHW21k49W8o8J366lqVKY=
-github.com/aws/aws-sdk-go-v2/service/athena v1.18.12 h1:TkKwMmoJn0rYmQohsXA+YNDAHsHaFq9WNjtNm3qEH5k=
-github.com/aws/aws-sdk-go-v2/service/athena v1.18.12/go.mod h1:e5HMOK5cxCNAl7x7qlXg018w98r7gGYeoV+8Hn74ZMI=
+github.com/aws/aws-sdk-go-v2/service/athena v1.19.1 h1:mfDR8JFjvjw9BQ9z4H8JVdioya0FEdUWR9XYaYXRoQs=
+github.com/aws/aws-sdk-go-v2/service/athena v1.19.1/go.mod h1:e5HMOK5cxCNAl7x7qlXg018w98r7gGYeoV+8Hn74ZMI=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.5.0/go.mod h1:acH3+MQoiMzozT/ivU+DbRg7Ooo2298RdRaWcOv+4vM=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.8.1/go.mod h1:CM+19rL1+4dFWnOQKwDc7H1KwXTz+h61oUSHyhV0b3o=
 github.com/aws/aws-sdk-go-v2/service/glue v1.34.0 h1:jdw7iupnOuHx4zt0CpGVYIUSxJIXIUytTdfrNbjSo84=
