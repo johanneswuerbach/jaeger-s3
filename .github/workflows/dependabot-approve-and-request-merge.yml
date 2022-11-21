@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Dependabot metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v1.1.1
+        uses: dependabot/fetch-metadata@v1.3.5
         with:
           github-token: "${{ secrets.DEPENDABOT_GH_TOKEN }}"
       - name: Approve a PR
@@ -21,7 +21,7 @@ jobs:
           PR_URL: ${{github.event.pull_request.html_url}}
           GITHUB_TOKEN: ${{secrets.DEPENDABOT_GH_TOKEN}}
       - name: Enable auto-merge for Dependabot PRs
-        run: gh pr merge --auto --merge --squash "$PR_URL"
+        run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
           GITHUB_TOKEN: ${{secrets.DEPENDABOT_GH_TOKEN}}
