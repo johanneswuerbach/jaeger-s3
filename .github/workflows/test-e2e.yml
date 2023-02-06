@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - uses: LouisBrunner/checks-action@v1.5.0
+      - uses: LouisBrunner/checks-action@v1.6.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: test-e2e
@@ -40,7 +40,7 @@ jobs:
           curl -SL https://github.com/docker/compose/releases/download/v2.0.0/docker-compose-linux-amd64 -o ~/.docker/cli-plugins/docker-compose
           chmod +x ~/.docker/cli-plugins/docker-compose
       - run: make test-jaeger-grpc-integration
-      - uses: LouisBrunner/checks-action@v1.5.0
+      - uses: LouisBrunner/checks-action@v1.6.0
         if: always()
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
