@@ -1,4 +1,4 @@
-FROM golang:1.20.0 AS base
+FROM golang:1.20.1 AS base
 
 FROM base AS code
 ARG GOARCH=amd64
