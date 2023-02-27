@@ -3,7 +3,7 @@ module github.com/johanneswuerbach/jaeger-s3
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.17.4
+	github.com/aws/aws-sdk-go-v2 v1.17.5
 	github.com/aws/aws-sdk-go-v2/config v1.18.13
 	github.com/aws/aws-sdk-go-v2/service/athena v1.22.2
 	github.com/aws/aws-sdk-go-v2/service/glue v1.43.0
