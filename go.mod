@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.17.6
-	github.com/aws/aws-sdk-go-v2/config v1.18.16
+	github.com/aws/aws-sdk-go-v2/config v1.18.18
 	github.com/aws/aws-sdk-go-v2/service/athena v1.23.1
 	github.com/aws/aws-sdk-go-v2/service/glue v1.43.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.30.6
@@ -27,8 +27,8 @@ require (
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
 	github.com/apache/thrift v0.17.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.10 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.13.16 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.24 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.13.17 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.13.0 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.11.33 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.24 // indirect
