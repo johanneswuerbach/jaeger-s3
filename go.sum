@@ -501,8 +501,8 @@ github.com/aws/aws-sdk-go-v2/service/athena v1.23.2 h1:pkwB869jPSFLMcNq9memfUJju
 github.com/aws/aws-sdk-go-v2/service/athena v1.23.2/go.mod h1:eAiA/Po1i6D8kVj4nLnlfIQxTE1AYn4C0VUvtO+Qflw=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.5.0/go.mod h1:acH3+MQoiMzozT/ivU+DbRg7Ooo2298RdRaWcOv+4vM=
 github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.8.1/go.mod h1:CM+19rL1+4dFWnOQKwDc7H1KwXTz+h61oUSHyhV0b3o=
-github.com/aws/aws-sdk-go-v2/service/glue v1.43.3 h1:6ReGMPA4rWmhS39cZy51B3JAqK3XjVcI2TDw/xYvpTs=
-github.com/aws/aws-sdk-go-v2/service/glue v1.43.3/go.mod h1:MijroyUIAnDETvx0pVHMOKAhBEX+t2SX3thfdBKuFoc=
+github.com/aws/aws-sdk-go-v2/service/glue v1.43.4 h1:RUHUrbZtC3S9pj4MC2giRqQqlJInS6j5mHQA8WuXIYc=
+github.com/aws/aws-sdk-go-v2/service/glue v1.43.4/go.mod h1:l1olGshg8Y6TJIomXhZFpB6NGBajikzxg7WYjoGvOg4=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.2.1/go.mod h1:v33JQ57i2nekYTA70Mb+O18KeH4KqhdqxTJZNK1zdRE=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.9/go.mod h1:a9j48l6yL5XINLHLcOKInjdvknN+vWqPBxqeIDw7ktw=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.9.11 h1:y2+VQzC6Zh2ojtV2LoC0MNwHWc6qXv/j2vrQtlftkdA=
