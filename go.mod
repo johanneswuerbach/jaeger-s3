@@ -20,7 +20,7 @@ require (
 	github.com/stretchr/testify v1.8.2
 	github.com/xitongsys/parquet-go v1.6.2
 	github.com/xitongsys/parquet-go-source v0.0.0-20220723234337-052319f3f36b
-	golang.org/x/sync v0.1.0
+	golang.org/x/sync v0.2.0
 )
 
 require (
