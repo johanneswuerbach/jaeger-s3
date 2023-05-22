@@ -17,7 +17,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/ory/viper v1.7.5
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.3
 	github.com/xitongsys/parquet-go v1.6.2
 	github.com/xitongsys/parquet-go-source v0.0.0-20220723234337-052319f3f36b
 	golang.org/x/sync v0.2.0
