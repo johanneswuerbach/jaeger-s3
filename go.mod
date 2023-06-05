@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.18.0
 	github.com/aws/aws-sdk-go-v2/config v1.18.25
 	github.com/aws/aws-sdk-go-v2/service/athena v1.29.0
-	github.com/aws/aws-sdk-go-v2/service/glue v1.49.0
+	github.com/aws/aws-sdk-go-v2/service/glue v1.50.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.33.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
