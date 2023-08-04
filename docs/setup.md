@@ -223,6 +223,11 @@ resource "aws_athena_workgroup" "jaeger" {
     enforce_workgroup_configuration    = true
     publish_cloudwatch_metrics_enabled = true
 
+    engine_version {
+      # Doesn't currently work with version 3
+      selected_engine_version = "Athena engine version 2"
+    }
+
     result_configuration {
       output_location = "s3://${aws_s3_bucket.jaeger_athena_results.bucket}/"
 
