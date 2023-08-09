@@ -275,6 +275,7 @@ data "aws_iam_policy_document" "jaeger" {
       "athena:StartQueryExecution",
       "athena:StopQueryExecution",
       "athena:GetQueryExecution",
+      "athena:BatchGetQueryExecution",
       "athena:GetQueryResults",
       "athena:ListQueryExecutions",
     ]
