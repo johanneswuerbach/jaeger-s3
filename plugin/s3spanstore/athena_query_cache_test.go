@@ -258,3 +258,37 @@ func TestEarlyExitWithMultiplePages(t *testing.T) {
 	assert.NoError(err)
 	assert.NotNil(cachedQuery)
 }
+
+func TestUnprocessedResultsInBatchGetQueryExecutionResult(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	queryID := "get-services"
+
+	assert := assert.New(t)
+	ctx := context.TODO()
+
+	mockSvc := mocks.NewMockAthenaAPI(ctrl)
+	mockSvc.EXPECT().ListQueryExecutions(gomock.Any(), gomock.Any()).
+		Return(&athena.ListQueryExecutionsOutput{
+			QueryExecutionIds: []string{queryID},
+		}, nil)
+
+	mockSvc.EXPECT().BatchGetQueryExecution(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, input *athena.BatchGetQueryExecutionInput, _ ...func(*athena.Options)) (*athena.BatchGetQueryExecutionOutput, error) {
+			assert.Equal([]string{queryID}, input.QueryExecutionIds)
+
+			return &athena.BatchGetQueryExecutionOutput{
+				UnprocessedQueryExecutionIds: []types.UnprocessedQueryExecutionId{{
+					QueryExecutionId: aws.String(queryID),
+				}},
+			}, nil
+		})
+
+	cache := NewTestAthenaQueryCache(mockSvc)
+
+	cachedQuery, err := cache.Lookup(ctx, "service_name, operation_name", time.Second*60)
+
+	assert.Error(err)
+	assert.Nil(cachedQuery)
+}

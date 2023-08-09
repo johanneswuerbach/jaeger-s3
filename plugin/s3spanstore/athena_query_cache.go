@@ -90,8 +90,15 @@ func (c *AthenaQueryCache) Lookup(ctx context.Context, key string, ttl time.Dura
 				return fmt.Errorf("failed to get query executions: %w", err)
 			}
 
+			if len(result.UnprocessedQueryExecutionIds) > 0 {
+				// Likely permissions issue, so we should log and bail
+				c.logger.Warn("AthenaQueryCache/BatchGetQueryExecution: unprocessed query executions", "first", result.UnprocessedQueryExecutionIds[0])
+				return fmt.Errorf("failed to get query executions: unprocessed query executions")
+			}
+
 			executionsFetched += len(result.QueryExecutions)
 			for _, v := range result.QueryExecutions {
+
 				// Query already expired
 				if v.Status.SubmissionDateTime.Before(ttlTime) {
 					fetchCancelFunc() // Cancel search as results are ordered so no more recent query wll follow
