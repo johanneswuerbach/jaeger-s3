@@ -31,7 +31,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - name: Configure AWS credentials from CI account
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::962548656022:role/jaeger-s3-ci
           aws-region: us-east-1
