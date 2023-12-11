@@ -20,7 +20,7 @@ COPY --from=build /src/s3-plugin /go/bin
 FROM jaegertracing/all-in-one:1.51.0 AS jaeger-test
 COPY --from=build /src/s3-plugin /go/bin
 
-FROM alpine:3.18.4
+FROM alpine:3.19.0
 
 COPY --from=build /src/s3-plugin /jaeger-s3
 
